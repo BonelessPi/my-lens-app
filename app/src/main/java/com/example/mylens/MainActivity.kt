@@ -4,44 +4,54 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.example.mylens.ui.screens.CameraScreen
+import com.example.mylens.ui.screens.ExportScreen
+import com.example.mylens.ui.screens.HomeScreen
 import com.example.mylens.ui.theme.MyLensTheme
+import com.example.mylens.viewmodel.ScannerViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MyLensTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+            MyLensTheme{
+                MyLensApp()
             }
         }
     }
 }
 
 @Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
+fun MyLensApp() {
+    val navController = rememberNavController()
+    // Single shared ViewModel scoped above the nav graph so pages persist across screens
+    val viewModel: ScannerViewModel = viewModel()
 
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    MyLensTheme {
-        Greeting("Android")
+    NavHost(navController = navController, startDestination = "home") {
+        composable("home") {
+            HomeScreen(
+                onNavigateToCamera = { navController.navigate("camera") },
+                onNavigateToExport = { navController.navigate("export") },
+                viewModel = viewModel
+            )
+        }
+        composable("camera") {
+            CameraScreen(
+                onBack = { navController.popBackStack() },
+                viewModel = viewModel
+            )
+        }
+        composable("export") {
+            ExportScreen(
+                onBack = { navController.popBackStack() },
+                viewModel = viewModel
+            )
+        }
     }
 }
