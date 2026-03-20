@@ -14,7 +14,7 @@ object ImageUtils {
      * Works for JPEG, PNG, WebP, and HEIC (API 26+ native decoding).
      *
      * @param maxDimension  Downsamples large images so the longest side <= this value.
-     *                      Use 2048 for preview quality, 4096 for export quality.
+     *                      Use 1024 for auto-detect passes, 2048 for preview, 4096 for export.
      */
     fun decodeUri(context: Context, uri: Uri, maxDimension: Int = 2048): Bitmap? {
         return try {
@@ -24,7 +24,7 @@ object ImageUtils {
                 BitmapFactory.decodeStream(it, null, opts)
             }
 
-            // Calculate sample size
+            // Calculate sample size to stay under maxDimension
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, maxDimension)
             opts.inJustDecodeBounds = false
             opts.inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -50,8 +50,8 @@ object ImageUtils {
     }
 
     /**
-     * Apply an additional manual rotation (from user interaction) on top of an already
-     * EXIF-corrected bitmap. degrees should be 0, 90, 180, or 270.
+     * Apply a manual rotation (from user interaction) to an already EXIF-corrected bitmap.
+     * [degrees] should be 0, 90, 180, or 270.
      */
     fun rotateBitmap(bitmap: Bitmap, degrees: Int): Bitmap {
         if (degrees == 0) return bitmap
@@ -59,9 +59,6 @@ object ImageUtils {
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
-    /**
-     * Calculate BitmapFactory inSampleSize to keep decoded image within maxDimension.
-     */
     private fun calculateSampleSize(width: Int, height: Int, maxDimension: Int): Int {
         var sampleSize = 1
         val longestSide = maxOf(width, height)

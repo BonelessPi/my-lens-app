@@ -10,6 +10,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.mylens.ui.screens.CameraScreen
+import com.example.mylens.ui.screens.CropScreen
 import com.example.mylens.ui.screens.ExportScreen
 import com.example.mylens.ui.screens.HomeScreen
 import com.example.mylens.ui.theme.MyLensTheme
@@ -20,7 +21,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MyLensTheme{
+            MyLensTheme {
                 MyLensApp()
             }
         }
@@ -30,7 +31,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MyLensApp() {
     val navController = rememberNavController()
-    // Single shared ViewModel scoped above the nav graph so pages persist across screens
+    // Single ViewModel shared across all screens — holds the page list
     val viewModel: ScannerViewModel = viewModel()
 
     NavHost(navController = navController, startDestination = "home") {
@@ -38,6 +39,7 @@ fun MyLensApp() {
             HomeScreen(
                 onNavigateToCamera = { navController.navigate("camera") },
                 onNavigateToExport = { navController.navigate("export") },
+                onNavigateToCrop   = { pageId -> navController.navigate("crop/$pageId") },
                 viewModel = viewModel
             )
         }
@@ -49,6 +51,15 @@ fun MyLensApp() {
         }
         composable("export") {
             ExportScreen(
+                onBack = { navController.popBackStack() },
+                viewModel = viewModel
+            )
+        }
+        // pageId is passed as a path segment so CropScreen knows which page to edit
+        composable("crop/{pageId}") { backStackEntry ->
+            val pageId = backStackEntry.arguments?.getString("pageId") ?: return@composable
+            CropScreen(
+                pageId = pageId,
                 onBack = { navController.popBackStack() },
                 viewModel = viewModel
             )

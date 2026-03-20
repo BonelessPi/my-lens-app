@@ -1,18 +1,17 @@
 package com.example.mylens.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.RotateRight
+import androidx.compose.material.icons.filled.Rotate90DegreesCw
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -24,6 +23,7 @@ fun PageThumbnail(
     pageNumber: Int,
     onRotate: () -> Unit,
     onDelete: () -> Unit,
+    onEdit: () -> Unit,
     modifier: Modifier = Modifier,
     isDragging: Boolean = false
 ) {
@@ -58,29 +58,47 @@ fun PageThumbnail(
 
             Spacer(Modifier.width(8.dp))
 
-            // Thumbnail image with rotation applied
-            AsyncImage(
-                model = page.uri,
-                contentDescription = "Page $pageNumber",
-                contentScale = ContentScale.Fit,
+            // Thumbnail — tap to open crop editor
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(8.dp))
-                    .rotate(page.rotation.toFloat())
-            )
+            ) {
+                AsyncImage(
+                    model = page.uri,
+                    contentDescription = "Page $pageNumber",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .rotate(page.rotation.toFloat())
+                )
+                // Tap overlay to open crop screen
+                Surface(
+                    onClick = onEdit,
+                    modifier = Modifier.fillMaxSize(),
+                    color = androidx.compose.ui.graphics.Color.Transparent
+                ) {}
+            }
 
             Spacer(Modifier.width(8.dp))
 
             // Action buttons
             Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 IconButton(onClick = onRotate) {
                     Icon(
-                        imageVector = Icons.Default.RotateRight,
-                        contentDescription = "Rotate",
+                        imageVector = Icons.Default.Rotate90DegreesCw,
+                        contentDescription = "Rotate 90°",
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                IconButton(onClick = onEdit) {
+                    Icon(
+                        imageVector = Icons.Default.Crop,
+                        contentDescription = "Crop / warp",
                         tint = MaterialTheme.colorScheme.secondary
                     )
                 }

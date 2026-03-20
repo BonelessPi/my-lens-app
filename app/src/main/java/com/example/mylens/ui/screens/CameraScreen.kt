@@ -11,7 +11,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,7 +38,6 @@ fun CameraScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraPermission = rememberPermissionState(Manifest.permission.CAMERA)
 
-    // imageCapture use case — held in state so the capture button can reference it
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var isCaptureInProgress by remember { mutableStateOf(false) }
 
@@ -54,7 +53,8 @@ fun CameraScreen(
                 title = { Text("Camera") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "Back")
+                        // ArrowBack moved to AutoMirrored in recent versions
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 }
             )
@@ -66,7 +66,6 @@ fun CameraScreen(
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                // CameraX viewfinder
                 AndroidView(
                     factory = { ctx ->
                         val previewView = PreviewView(ctx)
@@ -76,8 +75,9 @@ fun CameraScreen(
                             val preview = Preview.Builder().build().also {
                                 it.setSurfaceProvider(previewView.surfaceProvider)
                             }
+                            // FIX: CAPTURE_MODE_STILL was removed; use CAPTURE_MODE_MAXIMIZE_QUALITY
                             val capture = ImageCapture.Builder()
-                                .setCaptureMode(ImageCapture.CAPTURE_MODE_STILL)
+                                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                                 .build()
                             imageCapture = capture
 
@@ -94,7 +94,6 @@ fun CameraScreen(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Capture button
                 FloatingActionButton(
                     onClick = {
                         if (!isCaptureInProgress) {
@@ -119,7 +118,6 @@ fun CameraScreen(
                 }
             }
         } else {
-            // Permission denied state
             Box(
                 modifier = Modifier
                     .fillMaxSize()

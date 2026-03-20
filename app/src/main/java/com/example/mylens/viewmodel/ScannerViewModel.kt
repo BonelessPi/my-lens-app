@@ -5,11 +5,13 @@ import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.mylens.data.CropRect
 import com.example.mylens.data.ScanPage
 import com.example.mylens.utils.PdfBuilder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import org.opencv.android.OpenCVLoader
 import java.io.File
 
 sealed class ExportState {
@@ -21,11 +23,15 @@ sealed class ExportState {
 
 class ScannerViewModel(application: Application) : AndroidViewModel(application) {
 
-    // The ordered list of pages. mutableStateListOf lets Compose observe individual changes.
     val pages = mutableStateListOf<ScanPage>()
 
     private val _exportState = MutableStateFlow<ExportState>(ExportState.Idle)
     val exportState: StateFlow<ExportState> = _exportState
+
+    init {
+        // Initialize OpenCV. With the Maven artifact this is synchronous and always succeeds.
+        OpenCVLoader.initLocal()
+    }
 
     // ── Page management ──────────────────────────────────────────────────────
 
@@ -52,6 +58,15 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         if (index == -1) return
         val page = pages[index]
         pages[index] = page.copy(rotation = (page.rotation + 90) % 360)
+    }
+
+    /**
+     * Save the crop quad for a page. Pass null to clear the crop (revert to full image).
+     */
+    fun setCrop(id: String, crop: CropRect?) {
+        val index = pages.indexOfFirst { it.id == id }
+        if (index == -1) return
+        pages[index] = pages[index].copy(cropRect = crop)
     }
 
     fun clearAll() {

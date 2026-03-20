@@ -3,13 +3,15 @@ package com.example.mylens.ui.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,24 +23,25 @@ import com.example.mylens.viewmodel.ScannerViewModel
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     onNavigateToCamera: () -> Unit,
     onNavigateToExport: () -> Unit,
+    onNavigateToCrop: (pageId: String) -> Unit,
     viewModel: ScannerViewModel = viewModel()
 ) {
-    // Multi-image picker (Photo Picker API — no permissions needed on API 33+)
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris ->
         if (uris.isNotEmpty()) viewModel.addPages(uris)
     }
 
-    // Reorderable list state
-    val reorderableState = rememberReorderableLazyListState(
-        onMove = { from, to -> viewModel.movePage(from.index, to.index) }
-    )
+    // FIX: create LazyListState separately and pass it to both LazyColumn and rememberReorderableLazyListState
+    val lazyListState = rememberLazyListState()
+    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        viewModel.movePage(from.index, to.index)
+    }
 
     Scaffold(
         topBar = {
@@ -54,11 +57,11 @@ fun HomeScreen(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Camera FAB
+                // Camera button
                 SmallFloatingActionButton(onClick = onNavigateToCamera) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = "Take photo")
+                    Icon(Icons.Default.PhotoCamera, contentDescription = "Take photo")
                 }
-                // Gallery picker FAB
+                // Gallery picker button
                 SmallFloatingActionButton(
                     onClick = {
                         photoPicker.launch(
@@ -68,13 +71,13 @@ fun HomeScreen(
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Add from gallery")
                 }
-                // Export FAB (only shown when there are pages)
+                // Export button — only shown when there are pages
                 if (viewModel.pages.isNotEmpty()) {
                     FloatingActionButton(
                         onClick = onNavigateToExport,
                         containerColor = MaterialTheme.colorScheme.primary
                     ) {
-                        Icon(Icons.Default.PictureAsPdf, contentDescription = "Export PDF")
+                        Icon(Icons.Default.Description, contentDescription = "Export PDF")
                     }
                 }
             }
@@ -93,7 +96,7 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Icon(
-                        Icons.Default.PictureAsPdf,
+                        Icons.Default.Description,
                         contentDescription = null,
                         modifier = Modifier.size(64.dp),
                         tint = MaterialTheme.colorScheme.outlineVariant
@@ -111,33 +114,31 @@ fun HomeScreen(
                 }
             }
         } else {
+            // FIX: pass lazyListState directly to LazyColumn instead of reorderableState.listState
             LazyColumn(
-                state = reorderableState.listState,
+                state = lazyListState,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(
-                    items = viewModel.pages,
-                    key = { it.id }
-                ) { page ->
+                items(items = viewModel.pages, key = { it.id }) { page ->
                     ReorderableItem(reorderableState, key = page.id) { isDragging ->
                         PageThumbnail(
                             page = page,
                             pageNumber = viewModel.pages.indexOf(page) + 1,
                             onRotate = { viewModel.rotatePage(page.id) },
                             onDelete = { viewModel.removePage(page.id) },
+                            onEdit   = { onNavigateToCrop(page.id) },
                             isDragging = isDragging,
+                            // FIX: longPressDraggableHandle is experimental — opt in explicitly
                             modifier = Modifier
                                 .fillMaxWidth()
-                                // Long-press drag handle on the whole card
                                 .longPressDraggableHandle()
                         )
                     }
                 }
-                // Bottom padding for FAB
                 item { Spacer(Modifier.height(80.dp)) }
             }
         }

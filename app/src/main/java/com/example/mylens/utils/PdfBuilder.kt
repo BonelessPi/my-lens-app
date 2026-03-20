@@ -2,7 +2,7 @@ package com.example.mylens.utils
 
 import android.content.Context
 import android.graphics.Bitmap
-import com.example.docscanner.data.ScanPage
+import com.example.mylens.data.ScanPage
 import com.itextpdf.io.image.ImageDataFactory
 import com.itextpdf.kernel.geom.PageSize
 import com.itextpdf.kernel.pdf.PdfDocument
@@ -18,7 +18,7 @@ object PdfBuilder {
 
     /**
      * Build a PDF from the list of ScanPages.
-     * Each page is sized to fit the image exactly (no margins).
+     * Applies perspective warp (if a CropRect is set) and rotation per page.
      * Runs on Dispatchers.IO.
      */
     suspend fun build(
@@ -37,24 +37,29 @@ object PdfBuilder {
 
         pages.forEach { page ->
             // Decode at full quality for export
-            val bitmap = ImageUtils.decodeUri(context, page.uri, maxDimension = 4096)
+            var bitmap = ImageUtils.decodeUri(context, page.uri, maxDimension = 4096)
                 ?: return@forEach
 
-            // Apply manual rotation on top of EXIF-corrected bitmap
-            val rotated = if (page.rotation != 0) {
-                ImageUtils.rotateBitmap(bitmap, page.rotation).also { bitmap.recycle() }
-            } else {
-                bitmap
+            // Apply perspective warp if a crop quad is set
+            if (page.cropRect != null) {
+                val warped = CropUtils.warpPerspective(bitmap, page.cropRect, outputMaxDim = 4096)
+                bitmap.recycle()
+                bitmap = warped
             }
 
-            // Convert bitmap to JPEG bytes
-            val bytes = bitmapToJpegBytes(rotated, quality = 90)
-            rotated.recycle()
+            // Apply manual rotation
+            if (page.rotation != 0) {
+                val rotated = ImageUtils.rotateBitmap(bitmap, page.rotation)
+                if (rotated !== bitmap) bitmap.recycle()
+                bitmap = rotated
+            }
 
-            // Create a PDF page sized exactly to the image (points = pixels here; iText uses 72dpi)
-            // For a scanner app we want the PDF page to match the image aspect, so we use
-            // a reasonable A4-like size scaled to fit.
-            val (pdfW, pdfH) = fitToA4Points(rotated.width.toFloat(), rotated.height.toFloat())
+            // Convert bitmap to JPEG bytes for iText7
+            val bytes = bitmapToJpegBytes(bitmap, quality = 90)
+            val (pdfW, pdfH) = fitToA4Points(bitmap.width.toFloat(), bitmap.height.toFloat())
+            bitmap.recycle()
+
+            // Add page sized exactly to fit the image
             val pageSize = PageSize(pdfW, pdfH)
             pdfDoc.addNewPage(pageSize)
 
@@ -71,12 +76,7 @@ object PdfBuilder {
         outputFile
     }
 
-    /**
-     * Scale image dimensions so the longest side fits within standard A4 at 150dpi equivalent.
-     * Returns (width, height) in PDF points (1 point = 1/72 inch).
-     */
     private fun fitToA4Points(imgW: Float, imgH: Float): Pair<Float, Float> {
-        // A4 in points: 595 x 842
         val maxW = 595f
         val maxH = 842f
         val scale = minOf(maxW / imgW, maxH / imgH)
