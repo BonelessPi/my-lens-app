@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.mylens"
+    namespace = "dev.bonelesspi.mylens"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.mylens"
+        applicationId = "dev.bonelesspi.mylens"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
