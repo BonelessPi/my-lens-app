@@ -1,11 +1,13 @@
 package dev.bonelesspi.mylens.ui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -17,9 +19,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.bonelesspi.mylens.data.ScanPage
+import sh.calvin.reorderable.ReorderableCollectionItemScope
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PageCard(
+fun ReorderableCollectionItemScope.PageCard(
     page: ScanPage,
     pageNumber: Int,
     onEdit: () -> Unit,
@@ -41,18 +45,34 @@ fun PageCard(
                 .fillMaxSize()
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Page number
-            Text(
-                text = "$pageNumber",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.width(28.dp)
-            )
+            // ── Drag grip zone ────────────────────────────────────────────────
+            // draggableHandle() here means drag starts immediately on touch of this
+            // zone — no long press required. The grip icon signals the affordance.
+            Column(
+                modifier = Modifier
+                    .width(36.dp)
+                    .fillMaxHeight()
+                    .draggableHandle(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Default.DragHandle,
+                    contentDescription = "Drag to reorder",
+                    tint = MaterialTheme.colorScheme.outlineVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "$pageNumber",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
 
-            // Thumbnail — uses workingBitmap if available (reflects all edits),
-            // falls back to raw URI for pages not yet opened in EditScreen
+            // ── Thumbnail ─────────────────────────────────────────────────────
             Box(
                 modifier = Modifier
                     .size(88.dp)
@@ -78,19 +98,9 @@ fun PageCard(
                 }
             }
 
-            // Drag hint
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = "Hold to reorder",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outlineVariant
-                )
-            }
+            Spacer(Modifier.weight(1f))
 
-            // Actions
+            // ── Actions ───────────────────────────────────────────────────────
             Column(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally

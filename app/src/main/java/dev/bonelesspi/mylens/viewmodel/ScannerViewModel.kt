@@ -1,7 +1,6 @@
 package dev.bonelesspi.mylens.viewmodel
 
 import android.app.Application
-import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.AndroidViewModel
@@ -28,11 +27,17 @@ sealed class ExportState {
 }
 
 /**
- * Edit resolution for working bitmaps kept in memory during editing.
- * Good balance between quality and memory — a 2048px bitmap is ~16MB RGBA.
- * Full quality re-decode happens at export time.
+ * Resolution used for all working bitmaps — both during editing and at export time.
+ *
+ * The working bitmap IS the export source: PdfBuilder encodes it directly with no
+ * further decode or transform pass. This means this constant directly controls the
+ * maximum output quality of exported PDFs.
+ *
+ * At 4096px the longest side: ~64MB per page in memory (ARGB_8888).
+ * For a personal scanner app scanning a handful of pages at a time this is fine.
+ * Lower to 2048 if memory pressure becomes an issue (produces ~16MB per page).
  */
-private const val EDIT_RESOLUTION = 2048
+private const val WORKING_RESOLUTION = 4096
 
 class ScannerViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -76,8 +81,8 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     // ── Working bitmap lifecycle ─────────────────────────────────────────────
 
     /**
-     * Decode the source URI into a working bitmap at edit resolution.
-     * Called when EditScreen opens a page for the first time (workingBitmap == null).
+     * Decode the source URI into a working bitmap at [WORKING_RESOLUTION].
+     * Called when EditScreen opens a page for the first time.
      * No-op if the page already has a working bitmap.
      */
     fun ensureWorkingBitmap(id: String) {
@@ -86,16 +91,17 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             val bitmap = withContext(Dispatchers.IO) {
-                ImageUtils.decodeUri(getApplication(), pages[index].uri, EDIT_RESOLUTION)
+                ImageUtils.decodeUri(getApplication(), pages[index].uri, WORKING_RESOLUTION)
             } ?: return@launch
 
             val i = pages.indexOfFirst { it.id == id }
             if (i != -1) pages[i] = pages[i].copy(workingBitmap = bitmap)
+            else bitmap.recycle()
         }
     }
 
     /**
-     * Reset a page's working bitmap back to a fresh decode of the source URI.
+     * Reset a page to a fresh decode of its source URI, discarding all edits.
      * Recycles the old working bitmap.
      */
     fun resetPage(id: String) {
@@ -104,7 +110,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             val bitmap = withContext(Dispatchers.IO) {
-                ImageUtils.decodeUri(getApplication(), pages[index].uri, EDIT_RESOLUTION)
+                ImageUtils.decodeUri(getApplication(), pages[index].uri, WORKING_RESOLUTION)
             } ?: return@launch
 
             val i = pages.indexOfFirst { it.id == id }
@@ -120,8 +126,8 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     // ── Edit operations ──────────────────────────────────────────────────────
 
     /**
-     * Rotate the working bitmap 90° clockwise in-place.
-     * The result replaces the current working bitmap; the old one is recycled.
+     * Rotate the working bitmap 90° clockwise.
+     * Result replaces the current working bitmap; old one is recycled.
      */
     fun applyRotate(id: String) {
         val index = pages.indexOfFirst { it.id == id }
@@ -143,10 +149,9 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
-     * Apply a perspective warp to the working bitmap using [crop].
-     * The warped result replaces the current working bitmap; the old one is recycled.
-     * Since this is baked into the bitmap, the operation is visible immediately
-     * in both EditScreen and the SelectScreen thumbnail.
+     * Apply a perspective warp to the working bitmap.
+     * Result replaces the current working bitmap; old one is recycled.
+     * Output is capped at [WORKING_RESOLUTION] on the longest side.
      */
     fun applyWarp(id: String, crop: CropRect) {
         val index = pages.indexOfFirst { it.id == id }
@@ -154,7 +159,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         val current = pages[index].workingBitmap ?: return
 
         viewModelScope.launch {
-            val warped = CropUtils.warpPerspective(current, crop, outputMaxDim = EDIT_RESOLUTION)
+            val warped = CropUtils.warpPerspective(current, crop, outputMaxDim = WORKING_RESOLUTION)
             val i = pages.indexOfFirst { it.id == id }
             if (i != -1) {
                 current.recycle()
@@ -167,6 +172,14 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     // ── PDF export ────────────────────────────────────────────────────────────
 
+    /**
+     * Export all pages to a PDF file.
+     *
+     * Pages that have a working bitmap are encoded directly from it — the working
+     * bitmap is the single source of truth for both editing and export.
+     * Pages that were never opened in EditScreen (no working bitmap) are decoded
+     * fresh from their URI at [WORKING_RESOLUTION] by PdfBuilder as a fallback.
+     */
     fun exportPdf(
         outputDir: File,
         fileName: String = "scan.pdf",
@@ -177,12 +190,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             _exportState.value = ExportState.Building
             try {
                 val file = PdfBuilder.build(
-                    context = getApplication(),
-                    pages = pages.toList(),
-                    outputDir = outputDir,
-                    fileName = fileName,
-                    pageSize = pageSize,
-                    quality = quality
+                    context    = getApplication(),
+                    pages      = pages.toList(),
+                    outputDir  = outputDir,
+                    fileName   = fileName,
+                    pageSize   = pageSize,
+                    quality    = quality,
+                    fallbackResolution = WORKING_RESOLUTION
                 )
                 _exportState.value = ExportState.Done(file)
             } catch (e: Exception) {
