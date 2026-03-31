@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -43,12 +44,38 @@ fun SelectScreen(
         viewModel.movePage(from.index, to.index)
     }
 
+    var showClearConfirm by remember { mutableStateOf(false) }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text("Clear all pages?") },
+            text = { Text("All ${viewModel.pages.size} pages will be removed. This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.clearAll()
+                    showClearConfirm = false
+                }) { Text("Clear all", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("MyLens") },
                 actions = {
                     if (viewModel.pages.isNotEmpty()) {
+                        IconButton(onClick = { showClearConfirm = true }) {
+                            Icon(
+                                Icons.Default.DeleteSweep,
+                                contentDescription = "Clear all pages",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
                         TextButton(onClick = onNavigateToExport) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowForward,

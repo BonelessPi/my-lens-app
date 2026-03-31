@@ -10,7 +10,6 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Refresh
@@ -36,9 +35,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import dev.bonelesspi.mylens.data.CropRect
-import dev.bonelesspi.mylens.utils.CropUtils
 import dev.bonelesspi.mylens.viewmodel.ScannerViewModel
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sqrt
 
@@ -57,12 +54,10 @@ fun EditScreen(
     viewModel: ScannerViewModel = viewModel()
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val page = viewModel.pages.firstOrNull { it.id == pageId } ?: run { onBack(); return }
 
     var cropMode by remember { mutableStateOf(false) }
     var workingCrop by remember { mutableStateOf(CropRect()) }
-    var isAutoDetecting by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var imageIntrinsicSize by remember { mutableStateOf<IntSize?>(null) }
@@ -351,24 +346,6 @@ fun EditScreen(
                                 .padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            OutlinedButton(
-                                onClick = {
-                                    scope.launch {
-                                        isAutoDetecting = true
-                                        val bitmap = page.workingBitmap
-                                        if (bitmap != null) {
-                                            workingCrop = CropUtils.detectDocumentCorners(bitmap)
-                                        }
-                                        isAutoDetecting = false
-                                    }
-                                },
-                                enabled = !isAutoDetecting && page.workingBitmap != null,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.AutoFixHigh, null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text("Auto-detect edges")
-                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -424,11 +401,11 @@ fun EditScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // Inset image 5% on each side so crop handles near the edges are easy to reach
+                .padding(horizontal = 20.dp)
                 .onSizeChanged { canvasSize = it },
             contentAlignment = Alignment.Center
         ) {
-            if (isAutoDetecting) CircularProgressIndicator()
-
             val bitmap = page.workingBitmap
             if (bitmap != null) {
                 // remember keyed on the bitmap instance — asImageBitmap() creates a GPU
