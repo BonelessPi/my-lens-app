@@ -11,7 +11,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import dev.bonelesspi.mylens.ui.screens.CameraScreen
 import dev.bonelesspi.mylens.ui.screens.EditScreen
-import dev.bonelesspi.mylens.ui.screens.ExportScreen
 import dev.bonelesspi.mylens.ui.screens.SelectScreen
 import dev.bonelesspi.mylens.ui.theme.MyLensTheme
 import dev.bonelesspi.mylens.viewmodel.ScannerViewModel
@@ -33,15 +32,14 @@ fun MyLensApp() {
     val navController = rememberNavController()
     val viewModel: ScannerViewModel = viewModel()
 
-    // SelectScreen is the start destination — no Home screen
     NavHost(navController = navController, startDestination = "select") {
 
         composable("select") {
             SelectScreen(
-                onNavigateToCamera = { navController.navigate("camera") },
-                onNavigateToEdit   = { pageId -> navController.navigate("edit/$pageId") },
-                onNavigateToExport = { navController.navigate("export") },
-                viewModel = viewModel
+                onNavigateToCamera   = { navController.navigate("camera") },
+                onNavigateToEdit     = { pageId -> navController.navigate("edit/$pageId") },
+                onNavigateToSettings = { /* TODO: navController.navigate("settings") */ },
+                viewModel            = viewModel
             )
         }
 
@@ -56,13 +54,6 @@ fun MyLensApp() {
             val pageId = backStackEntry.arguments?.getString("pageId") ?: return@composable
             EditScreen(
                 pageId    = pageId,
-                onBack    = { navController.popBackStack() },
-                viewModel = viewModel
-            )
-        }
-
-        composable("export") {
-            ExportScreen(
                 onBack    = { navController.popBackStack() },
                 viewModel = viewModel
             )
