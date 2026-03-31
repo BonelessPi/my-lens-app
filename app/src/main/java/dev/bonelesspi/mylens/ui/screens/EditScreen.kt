@@ -431,15 +431,19 @@ fun EditScreen(
 
             val bitmap = page.workingBitmap
             if (bitmap != null) {
+                // remember keyed on the bitmap instance — asImageBitmap() creates a GPU
+                // texture upload and must NOT be called on every recomposition (which happens
+                // every frame during drag). Only recreate when the underlying Bitmap changes.
+                val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
+                // Keep intrinsic size in sync whenever bitmap changes
+                LaunchedEffect(bitmap) {
+                    imageIntrinsicSize = IntSize(bitmap.width, bitmap.height)
+                }
                 Image(
-                    bitmap = bitmap.asImageBitmap(),
+                    bitmap = imageBitmap,
                     contentDescription = "Page preview",
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .onSizeChanged {
-                            imageIntrinsicSize = IntSize(bitmap.width, bitmap.height)
-                        }
+                    modifier = Modifier.fillMaxSize()
                 )
             } else {
                 AsyncImage(

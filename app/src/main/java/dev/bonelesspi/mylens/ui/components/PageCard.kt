@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,10 +81,15 @@ fun ReorderableCollectionItemScope.PageCard(
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
-                val bitmap = page.workingBitmap
+                // Use the pre-scaled thumbnail for display — workingBitmap is full
+                // resolution and would cause render thread stutter in a scrolling list
+                val bitmap = page.thumbnailBitmap
                 if (bitmap != null) {
+                    // remember keyed on bitmap instance to avoid creating a new GPU texture
+                    // upload on every recomposition
+                    val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
                     Image(
-                        bitmap = bitmap.asImageBitmap(),
+                        bitmap = imageBitmap,
                         contentDescription = "Page $pageNumber thumbnail",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()

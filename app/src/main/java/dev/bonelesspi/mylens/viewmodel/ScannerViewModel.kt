@@ -1,6 +1,7 @@
 package dev.bonelesspi.mylens.viewmodel
 
 import android.app.Application
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.AndroidViewModel
@@ -18,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.opencv.android.OpenCVLoader
 import java.io.File
+import androidx.core.graphics.scale
 
 sealed class ExportState {
     object Idle : ExportState()
@@ -64,6 +66,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         val index = pages.indexOfFirst { it.id == id }
         if (index == -1) return
         pages[index].workingBitmap?.recycle()
+        pages[index].thumbnailBitmap?.recycle()
         pages.removeAt(index)
     }
 
@@ -73,12 +76,27 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun clearAll() {
-        pages.forEach { it.workingBitmap?.recycle() }
+        pages.forEach {
+            it.workingBitmap?.recycle()
+            it.thumbnailBitmap?.recycle()
+        }
         pages.clear()
         _exportState.value = ExportState.Idle
     }
 
     // ── Working bitmap lifecycle ─────────────────────────────────────────────
+
+    /**
+     * Generate a ~240px thumbnail from [source]. Cheap — just a scale-down.
+     * Call this whenever the working bitmap is set or replaced.
+     */
+    private fun makeThumbnail(source: Bitmap): Bitmap {
+        val maxDim = 240
+        val scale = maxDim.toFloat() / maxOf(source.width, source.height)
+        val w = (source.width * scale).toInt().coerceAtLeast(1)
+        val h = (source.height * scale).toInt().coerceAtLeast(1)
+        return source.scale(w, h)
+    }
 
     /**
      * Decode the source URI into a working bitmap at [WORKING_RESOLUTION].
@@ -94,15 +112,21 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 ImageUtils.decodeUri(getApplication(), pages[index].uri, WORKING_RESOLUTION)
             } ?: return@launch
 
+            val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(bitmap) }
+
             val i = pages.indexOfFirst { it.id == id }
-            if (i != -1) pages[i] = pages[i].copy(workingBitmap = bitmap)
-            else bitmap.recycle()
+            if (i != -1) {
+                pages[i] = pages[i].copy(workingBitmap = bitmap, thumbnailBitmap = thumbnail)
+            } else {
+                bitmap.recycle()
+                thumbnail.recycle()
+            }
         }
     }
 
     /**
      * Reset a page to a fresh decode of its source URI, discarding all edits.
-     * Recycles the old working bitmap.
+     * Recycles the old working bitmap and thumbnail.
      */
     fun resetPage(id: String) {
         val index = pages.indexOfFirst { it.id == id }
@@ -113,12 +137,16 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 ImageUtils.decodeUri(getApplication(), pages[index].uri, WORKING_RESOLUTION)
             } ?: return@launch
 
+            val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(bitmap) }
+
             val i = pages.indexOfFirst { it.id == id }
             if (i != -1) {
                 pages[i].workingBitmap?.recycle()
-                pages[i] = pages[i].copy(workingBitmap = bitmap)
+                pages[i].thumbnailBitmap?.recycle()
+                pages[i] = pages[i].copy(workingBitmap = bitmap, thumbnailBitmap = thumbnail)
             } else {
                 bitmap.recycle()
+                thumbnail.recycle()
             }
         }
     }
@@ -138,12 +166,16 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             val rotated = withContext(Dispatchers.Default) {
                 ImageUtils.rotateBitmap(current, 90)
             }
+            val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(rotated) }
+
             val i = pages.indexOfFirst { it.id == id }
             if (i != -1) {
                 if (rotated !== current) current.recycle()
-                pages[i] = pages[i].copy(workingBitmap = rotated)
+                pages[i].thumbnailBitmap?.recycle()
+                pages[i] = pages[i].copy(workingBitmap = rotated, thumbnailBitmap = thumbnail)
             } else {
                 rotated.recycle()
+                thumbnail.recycle()
             }
         }
     }
@@ -160,12 +192,16 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             val warped = CropUtils.warpPerspective(current, crop, outputMaxDim = WORKING_RESOLUTION)
+            val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(warped) }
+
             val i = pages.indexOfFirst { it.id == id }
             if (i != -1) {
                 current.recycle()
-                pages[i] = pages[i].copy(workingBitmap = warped)
+                pages[i].thumbnailBitmap?.recycle()
+                pages[i] = pages[i].copy(workingBitmap = warped, thumbnailBitmap = thumbnail)
             } else {
                 warped.recycle()
+                thumbnail.recycle()
             }
         }
     }

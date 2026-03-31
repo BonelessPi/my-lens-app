@@ -19,5 +19,8 @@ import java.util.UUID
 data class ScanPage(
     val id: String = UUID.randomUUID().toString(),
     val uri: Uri,
-    val workingBitmap: Bitmap? = null
+    val workingBitmap: Bitmap? = null,
+    // Low-res (~240px) copy used for SelectScreen thumbnails only.
+    // Regenerated whenever workingBitmap changes. Null until first EditScreen open.
+    val thumbnailBitmap: Bitmap? = null
 )
