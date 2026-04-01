@@ -3,9 +3,9 @@ package dev.bonelesspi.mylens.utils
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
-import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import dev.bonelesspi.mylens.data.EditAction
 import dev.bonelesspi.mylens.data.ScanPage
 import dev.bonelesspi.mylens.ui.screens.PageSize
 import com.itextpdf.io.image.ImageDataFactory
@@ -18,22 +18,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileOutputStream
 
 object PdfBuilder {
 
     /**
-     * Build a PDF from the given pages and write it to [outputDir]/[fileName].
+     * Build a PDF from the given pages.
      *
-     * For each page:
-     * - If [ScanPage.workingBitmap] is present, it is encoded directly. The working
-     *   bitmap is the authoritative edit state — no further decode or transform is applied.
-     * - If no working bitmap exists (page was never opened in EditScreen), the source
-     *   URI is decoded at [fallbackResolution] as a fallback. This ensures pages added
-     *   to a scan but never edited still appear in the PDF at a consistent quality.
+     * For each page, decodes the source URI fresh at [exportResolution] and applies
+     * the page's action list at full quality. This ensures exported PDFs are always
+     * at maximum quality regardless of the preview resolution used during editing.
      *
-     * [fallbackResolution] should match WORKING_RESOLUTION in ScannerViewModel so that
-     * edited and unedited pages are encoded at the same quality ceiling.
+     * Pages with no actions are simply decoded and encoded directly.
      */
     suspend fun build(
         context: Context,
@@ -42,11 +37,9 @@ object PdfBuilder {
         fileName: String,
         pageSize: PageSize = PageSize.A4,
         quality: Int = 90,
-        fallbackResolution: Int = 4096
+        exportResolution: Int = 4096
     ): File = withContext(Dispatchers.IO) {
 
-        // Write to app-private cache first — iText7 can always write here regardless
-        // of Android version or storage permissions. We copy to the target location after.
         val cacheFile = File(context.cacheDir, fileName)
 
         val writer = PdfWriter(cacheFile)
@@ -55,26 +48,26 @@ object PdfBuilder {
         document.setMargins(0f, 0f, 0f, 0f)
 
         pages.forEach { page ->
-            // Determine the bitmap source and whether we own it (must recycle after use)
-            val ownsBitmap: Boolean
-            val bitmap: Bitmap
+            // Always decode fresh from URI at full export resolution
+            var bitmap = ImageUtils.decodeUri(
+                context, page.uri, maxDimension = exportResolution
+            ) ?: return@forEach
 
-            if (page.workingBitmap != null) {
-                // Primary path: encode working bitmap directly, no transforms needed
-                bitmap = page.workingBitmap
-                ownsBitmap = false  // still owned by ViewModel, do not recycle
-            } else {
-                // Fallback: page was never edited — decode from source URI
-                val decoded = ImageUtils.decodeUri(
-                    context, page.uri, maxDimension = fallbackResolution
-                ) ?: return@forEach
-                bitmap = decoded
-                ownsBitmap = true
+            // Apply the action stack at full resolution
+            for (action in page.actions) {
+                val next = when (action) {
+                    is EditAction.Rotate -> ImageUtils.rotateBitmap(bitmap, 90)
+                    is EditAction.Warp   -> CropUtils.warpPerspective(
+                        bitmap, action.crop, outputMaxDim = exportResolution
+                    )
+                }
+                bitmap.recycle()
+                bitmap = next
             }
 
             val bytes = bitmapToJpegBytes(bitmap, quality)
             val (pdfW, pdfH) = resolvePageSize(pageSize, bitmap.width.toFloat(), bitmap.height.toFloat())
-            if (ownsBitmap) bitmap.recycle()
+            bitmap.recycle()
 
             pdfDoc.addNewPage(ITextPageSize(pdfW, pdfH))
             val imageData = ImageDataFactory.create(bytes)
@@ -88,7 +81,6 @@ object PdfBuilder {
 
         document.close()
 
-        // Verify the output is a valid PDF before copying it anywhere
         val header = cacheFile.inputStream().use { it.readNBytes(4) }
         if (header.toString(Charsets.US_ASCII) != "%PDF") {
             cacheFile.delete()
@@ -100,70 +92,49 @@ object PdfBuilder {
         outputFile
     }
 
-    /**
-     * Copy the finished PDF to its final destination.
-     *
-     * On API 29+ we use MediaStore so the file is immediately visible in the Files
-     * app with the correct MIME type. On older versions we write directly.
-     *
-     * The [outputDir] parameter is used for direct file writes (API < 29) and as a
-     * hint for the MediaStore RELATIVE_PATH on API 29+.
-     */
     private fun copyToDestination(
         context: Context,
         src: File,
         fileName: String,
         outputDir: File
     ): File {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val resolver = context.contentResolver
-
-            // Derive a relative path for MediaStore from the output directory
-            val externalRoot = Environment.getExternalStorageDirectory().absolutePath
-            val relativePath = if (outputDir.absolutePath.startsWith(externalRoot)) {
-                outputDir.absolutePath.removePrefix(externalRoot).trimStart('/')
-            } else {
-                Environment.DIRECTORY_DOCUMENTS
-            }
-
-            val contentValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-            }
-
-            // Remove any existing file with the same name in the same folder
-            resolver.query(
-                MediaStore.Files.getContentUri("external"),
-                arrayOf(MediaStore.MediaColumns._ID),
-                "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
-                arrayOf(fileName, "$relativePath/"),
-                null
-            )?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val id = cursor.getLong(0)
-                    resolver.delete(MediaStore.Files.getContentUri("external", id), null, null)
-                }
-            }
-
-            val uri = resolver.insert(
-                MediaStore.Files.getContentUri("external"),
-                contentValues
-            ) ?: throw IllegalStateException("MediaStore insert failed")
-
-            resolver.openOutputStream(uri)?.use { out ->
-                src.inputStream().use { it.copyTo(out) }
-            } ?: throw IllegalStateException("Could not open MediaStore output stream")
-
-            File(outputDir, fileName)
+        val resolver = context.contentResolver
+        val externalRoot = Environment.getExternalStorageDirectory().absolutePath
+        val relativePath = if (outputDir.absolutePath.startsWith(externalRoot)) {
+            outputDir.absolutePath.removePrefix(externalRoot).trimStart('/')
         } else {
-            outputDir.mkdirs()
-            val dest = File(outputDir, fileName)
-            src.inputStream().use { input ->
-                FileOutputStream(dest).use { output -> input.copyTo(output) }
-            }
-            dest
+            Environment.DIRECTORY_DOCUMENTS
         }
+
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+        }
+
+        resolver.query(
+            MediaStore.Files.getContentUri("external"),
+            arrayOf(MediaStore.MediaColumns._ID),
+            "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
+            arrayOf(fileName, "$relativePath/"),
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(0)
+                resolver.delete(MediaStore.Files.getContentUri("external", id), null, null)
+            }
+        }
+
+        val uri = resolver.insert(
+            MediaStore.Files.getContentUri("external"),
+            contentValues
+        ) ?: throw IllegalStateException("MediaStore insert failed")
+
+        resolver.openOutputStream(uri)?.use { out ->
+            src.inputStream().use { it.copyTo(out) }
+        } ?: throw IllegalStateException("Could not open MediaStore output stream")
+
+        return File(outputDir, fileName)
     }
 
     private fun resolvePageSize(pageSize: PageSize, imgW: Float, imgH: Float): Pair<Float, Float> {

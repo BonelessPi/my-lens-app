@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.bonelesspi.mylens.data.CropRect
+import dev.bonelesspi.mylens.data.EditAction
 import dev.bonelesspi.mylens.data.ScanPage
 import dev.bonelesspi.mylens.ui.screens.PageSize
 import dev.bonelesspi.mylens.utils.CropUtils
@@ -28,18 +29,14 @@ sealed class ExportState {
     data class Error(val message: String) : ExportState()
 }
 
-/**
- * Resolution used for all working bitmaps — both during editing and at export time.
- *
- * The working bitmap IS the export source: PdfBuilder encodes it directly with no
- * further decode or transform pass. This means this constant directly controls the
- * maximum output quality of exported PDFs.
- *
- * At 4096px the longest side: ~64MB per page in memory (ARGB_8888).
- * For a personal scanner app scanning a handful of pages at a time this is fine.
- * Lower to 2048 if memory pressure becomes an issue (produces ~16MB per page).
- */
-private const val WORKING_RESOLUTION = 4096
+/** Longest side in pixels for the preview bitmap shown in EditScreen. ~720p. */
+private const val PREVIEW_RESOLUTION = 1280
+
+/** Longest side in pixels for the thumbnail shown in SelectScreen. ~144p. */
+private const val THUMBNAIL_RESOLUTION = 144
+
+/** Longest side in pixels for export. Decoded fresh from URI at export time. */
+private const val EXPORT_RESOLUTION = 4096
 
 class ScannerViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -65,8 +62,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     fun removePage(id: String) {
         val index = pages.indexOfFirst { it.id == id }
         if (index == -1) return
-        pages[index].workingBitmap?.recycle()
-        pages[index].thumbnailBitmap?.recycle()
+        recyclePage(pages[index])
         pages.removeAt(index)
     }
 
@@ -76,76 +72,95 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun clearAll() {
-        pages.forEach {
-            it.workingBitmap?.recycle()
-            it.thumbnailBitmap?.recycle()
-        }
+        pages.forEach { recyclePage(it) }
         pages.clear()
         _exportState.value = ExportState.Idle
     }
 
-    // ── Working bitmap lifecycle ─────────────────────────────────────────────
+    /** Recycle all bitmaps owned by a page. */
+    private fun recyclePage(page: ScanPage) {
+        page.baseBitmap?.recycle()
+        page.previewBitmap?.recycle()
+        page.thumbnailBitmap?.recycle()
+    }
 
-    /**
-     * Generate a ~240px thumbnail from [source]. Cheap — just a scale-down.
-     * Call this whenever the working bitmap is set or replaced.
-     */
+    // ── Bitmap helpers ────────────────────────────────────────────────────────
+
     private fun makeThumbnail(source: Bitmap): Bitmap {
-        val maxDim = 240
-        val scale = maxDim.toFloat() / maxOf(source.width, source.height)
-        val w = (source.width * scale).toInt().coerceAtLeast(1)
+        val scale = THUMBNAIL_RESOLUTION.toFloat() / maxOf(source.width, source.height)
+        val w = (source.width  * scale).toInt().coerceAtLeast(1)
         val h = (source.height * scale).toInt().coerceAtLeast(1)
         return source.scale(w, h)
     }
 
     /**
-     * Decode the source URI into a working bitmap at [WORKING_RESOLUTION].
-     * Called when EditScreen opens a page for the first time.
-     * No-op if the page already has a working bitmap.
+     * Apply [actions] in order to [base], returning the resulting bitmap.
+     * Each intermediate bitmap is recycled as we go to avoid accumulation.
+     * Used for undo (re-apply remainder of stack) and export (full-res re-apply).
+     * If actions is empty, returns a copy of [base].
      */
-    fun ensureWorkingBitmap(id: String) {
-        val index = pages.indexOfFirst { it.id == id }
-        if (index == -1 || pages[index].workingBitmap != null) return
-
-        viewModelScope.launch {
-            val bitmap = withContext(Dispatchers.IO) {
-                ImageUtils.decodeUri(getApplication(), pages[index].uri, WORKING_RESOLUTION)
-            } ?: return@launch
-
-            val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(bitmap) }
-
-            val i = pages.indexOfFirst { it.id == id }
-            if (i != -1) {
-                pages[i] = pages[i].copy(workingBitmap = bitmap, thumbnailBitmap = thumbnail)
-            } else {
-                bitmap.recycle()
-                thumbnail.recycle()
+    private suspend fun applyActions(base: Bitmap, actions: List<EditAction>): Bitmap =
+        withContext(Dispatchers.Default) {
+            if (actions.isEmpty()) return@withContext base.copy(base.config ?: Bitmap.Config.ARGB_8888, true)
+            var current = base
+            for (action in actions) {
+                val next = when (action) {
+                    is EditAction.Rotate -> ImageUtils.rotateBitmap(current, 90)
+                    is EditAction.Warp   -> CropUtils.warpPerspective(
+                        current, action.crop, outputMaxDim = PREVIEW_RESOLUTION
+                    )
+                }
+                // Recycle intermediate bitmaps but never recycle the original base
+                if (current !== base) current.recycle()
+                current = next
             }
+            current
         }
-    }
+
+    // ── EditScreen lifecycle ──────────────────────────────────────────────────
 
     /**
-     * Reset a page to a fresh decode of its source URI, discarding all edits.
-     * Recycles the old working bitmap and thumbnail.
+     * Ensure this page has a baseBitmap and previewBitmap ready for EditScreen.
+     * If baseBitmap is already present (page was opened before), only regenerates
+     * the previewBitmap if it is missing. No-op if both are already present.
      */
-    fun resetPage(id: String) {
+    fun ensurePreview(id: String) {
         val index = pages.indexOfFirst { it.id == id }
         if (index == -1) return
+        val page = pages[index]
+
+        // Both already ready — nothing to do
+        if (page.baseBitmap != null && page.previewBitmap != null) return
 
         viewModelScope.launch {
-            val bitmap = withContext(Dispatchers.IO) {
-                ImageUtils.decodeUri(getApplication(), pages[index].uri, WORKING_RESOLUTION)
-            } ?: return@launch
+            val base = // Already have base, just need to regenerate preview
+                page.baseBitmap
+                    ?: (// First open — decode from URI
+                            withContext(Dispatchers.IO) {
+                                ImageUtils.decodeUri(getApplication(), page.uri, PREVIEW_RESOLUTION)
+                            } ?: return@launch)
 
-            val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(bitmap) }
+            val preview = applyActions(base, page.actions)
+            val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(preview) }
 
             val i = pages.indexOfFirst { it.id == id }
             if (i != -1) {
-                pages[i].workingBitmap?.recycle()
+                // Recycle old preview and thumbnail if we're replacing them
+                if (pages[i].baseBitmap == null) {
+                    // Fresh base — recycle nothing (preview was null)
+                } else {
+                    pages[i].previewBitmap?.recycle()
+                }
                 pages[i].thumbnailBitmap?.recycle()
-                pages[i] = pages[i].copy(workingBitmap = bitmap, thumbnailBitmap = thumbnail)
+                pages[i] = pages[i].copy(
+                    baseBitmap     = base,
+                    previewBitmap  = preview,
+                    thumbnailBitmap = thumbnail
+                )
             } else {
-                bitmap.recycle()
+                // Page removed while we were loading
+                if (page.baseBitmap == null) base.recycle() // we own it
+                if (preview !== base) preview.recycle()
                 thumbnail.recycle()
             }
         }
@@ -154,13 +169,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     // ── Edit operations ──────────────────────────────────────────────────────
 
     /**
-     * Rotate the working bitmap 90° clockwise.
-     * Result replaces the current working bitmap; old one is recycled.
+     * Rotate 90° CW: append action, update previewBitmap in-place from current preview.
+     * Fast path — no re-apply from base needed.
      */
     fun applyRotate(id: String) {
         val index = pages.indexOfFirst { it.id == id }
         if (index == -1) return
-        val current = pages[index].workingBitmap ?: return
+        val current = pages[index].previewBitmap ?: return
 
         viewModelScope.launch {
             val rotated = withContext(Dispatchers.Default) {
@@ -172,7 +187,11 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             if (i != -1) {
                 if (rotated !== current) current.recycle()
                 pages[i].thumbnailBitmap?.recycle()
-                pages[i] = pages[i].copy(workingBitmap = rotated, thumbnailBitmap = thumbnail)
+                pages[i] = pages[i].copy(
+                    actions         = pages[i].actions + EditAction.Rotate,
+                    previewBitmap   = rotated,
+                    thumbnailBitmap = thumbnail
+                )
             } else {
                 rotated.recycle()
                 thumbnail.recycle()
@@ -181,24 +200,29 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
-     * Apply a perspective warp to the working bitmap.
-     * Result replaces the current working bitmap; old one is recycled.
-     * Output is capped at [WORKING_RESOLUTION] on the longest side.
+     * Warp: append action, update previewBitmap in-place from current preview.
+     * Fast path — no re-apply from base needed.
      */
     fun applyWarp(id: String, crop: CropRect) {
         val index = pages.indexOfFirst { it.id == id }
         if (index == -1) return
-        val current = pages[index].workingBitmap ?: return
+        val current = pages[index].previewBitmap ?: return
 
         viewModelScope.launch {
-            val warped = CropUtils.warpPerspective(current, crop, outputMaxDim = WORKING_RESOLUTION)
+            val warped = CropUtils.warpPerspective(
+                current, crop, outputMaxDim = PREVIEW_RESOLUTION
+            )
             val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(warped) }
 
             val i = pages.indexOfFirst { it.id == id }
             if (i != -1) {
                 current.recycle()
                 pages[i].thumbnailBitmap?.recycle()
-                pages[i] = pages[i].copy(workingBitmap = warped, thumbnailBitmap = thumbnail)
+                pages[i] = pages[i].copy(
+                    actions         = pages[i].actions + EditAction.Warp(crop),
+                    previewBitmap   = warped,
+                    thumbnailBitmap = thumbnail
+                )
             } else {
                 warped.recycle()
                 thumbnail.recycle()
@@ -206,16 +230,77 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    // ── PDF export ────────────────────────────────────────────────────────────
+    /**
+     * Undo the last action: pop from the action list, re-apply the remainder
+     * to baseBitmap to produce the new previewBitmap.
+     * No-op if the action list is empty.
+     */
+    fun undoLastAction(id: String) {
+        val index = pages.indexOfFirst { it.id == id }
+        if (index == -1) return
+        val page = pages[index]
+        if (page.actions.isEmpty()) return
+        val base = page.baseBitmap ?: return
+
+        val newActions = page.actions.dropLast(1)
+
+        viewModelScope.launch {
+            val newPreview = applyActions(base, newActions)
+            val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(newPreview) }
+
+            val i = pages.indexOfFirst { it.id == id }
+            if (i != -1) {
+                pages[i].previewBitmap?.recycle()
+                pages[i].thumbnailBitmap?.recycle()
+                pages[i] = pages[i].copy(
+                    actions         = newActions,
+                    previewBitmap   = newPreview,
+                    thumbnailBitmap = thumbnail
+                )
+            } else {
+                newPreview.recycle()
+                thumbnail.recycle()
+            }
+        }
+    }
 
     /**
-     * Export all pages to a PDF file.
-     *
-     * Pages that have a working bitmap are encoded directly from it — the working
-     * bitmap is the single source of truth for both editing and export.
-     * Pages that were never opened in EditScreen (no working bitmap) are decoded
-     * fresh from their URI at [WORKING_RESOLUTION] by PdfBuilder as a fallback.
+     * Reset a page: clear all actions, re-decode base from URI, regenerate preview.
      */
+    fun resetPage(id: String) {
+        val index = pages.indexOfFirst { it.id == id }
+        if (index == -1) return
+
+        viewModelScope.launch {
+            val newBase = withContext(Dispatchers.IO) {
+                ImageUtils.decodeUri(getApplication(), pages[index].uri, PREVIEW_RESOLUTION)
+            } ?: return@launch
+
+            // Preview after reset = base with no actions = copy of base
+            val newPreview = withContext(Dispatchers.Default) {
+                newBase.copy(newBase.config ?: Bitmap.Config.ARGB_8888, true)
+            }
+            val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(newPreview) }
+
+            val i = pages.indexOfFirst { it.id == id }
+            if (i != -1) {
+                recyclePage(pages[i])
+                pages[i] = pages[i].copy(
+                    actions         = emptyList(),
+                    baseBitmap      = newBase,
+                    previewBitmap   = newPreview,
+                    thumbnailBitmap = thumbnail
+                )
+            } else {
+                newBase.recycle()
+                newPreview.recycle()
+                thumbnail.recycle()
+            }
+        }
+    }
+
+    // ── PDF export ────────────────────────────────────────────────────────────
+
     fun exportPdf(
         outputDir: File,
         fileName: String = "scan.pdf",
@@ -226,13 +311,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             _exportState.value = ExportState.Building
             try {
                 val file = PdfBuilder.build(
-                    context    = getApplication(),
-                    pages      = pages.toList(),
-                    outputDir  = outputDir,
-                    fileName   = fileName,
-                    pageSize   = pageSize,
-                    quality    = quality,
-                    fallbackResolution = WORKING_RESOLUTION
+                    context          = getApplication(),
+                    pages            = pages.toList(),
+                    outputDir        = outputDir,
+                    fileName         = fileName,
+                    pageSize         = pageSize,
+                    quality          = quality,
+                    exportResolution = EXPORT_RESOLUTION
                 )
                 _exportState.value = ExportState.Done(file)
             } catch (e: Exception) {

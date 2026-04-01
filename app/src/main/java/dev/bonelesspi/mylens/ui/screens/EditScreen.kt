@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Refresh
@@ -73,7 +74,7 @@ fun EditScreen(
     val armWidthPx     = with(density) { 3.dp.toPx() }
     val sideDotRadiusPx = with(density) { 5.dp.toPx() }
 
-    LaunchedEffect(pageId) { viewModel.ensureWorkingBitmap(pageId) }
+    LaunchedEffect(pageId) { viewModel.ensurePreview(pageId) }
 
     // ── Coordinate helpers ────────────────────────────────────────────────────
 
@@ -287,7 +288,7 @@ fun EditScreen(
         AlertDialog(
             onDismissRequest = { showResetConfirm = false },
             title = { Text("Reset to original?") },
-            text = { Text("All rotations and crops applied to this page will be undone.") },
+            text = { Text("All edits applied to this page will be undone.") },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.resetPage(pageId)
@@ -319,6 +320,13 @@ fun EditScreen(
                 },
                 actions = {
                     if (!cropMode) {
+                        // Undo — only enabled when there are actions to undo
+                        IconButton(
+                            onClick = { viewModel.undoLastAction(pageId) },
+                            enabled = page.actions.isNotEmpty()
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Undo, "Undo last action")
+                        }
                         IconButton(onClick = { showResetConfirm = true }) {
                             Icon(Icons.Default.Refresh, "Reset to original")
                         }
@@ -360,7 +368,7 @@ fun EditScreen(
                                         workingCrop = CropRect()
                                         cropMode = false
                                     },
-                                    enabled = page.workingBitmap != null,
+                                    enabled = page.previewBitmap != null,
                                     modifier = Modifier.weight(1f)
                                 ) { Text("Apply") }
                             }
@@ -375,7 +383,7 @@ fun EditScreen(
                         ) {
                             OutlinedButton(
                                 onClick = { viewModel.applyRotate(pageId) },
-                                enabled = page.workingBitmap != null,
+                                enabled = page.previewBitmap != null,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(Icons.Default.Rotate90DegreesCw, null, modifier = Modifier.size(18.dp))
@@ -384,7 +392,7 @@ fun EditScreen(
                             }
                             OutlinedButton(
                                 onClick = { workingCrop = CropRect(); cropMode = true },
-                                enabled = page.workingBitmap != null,
+                                enabled = page.previewBitmap != null,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(Icons.Default.Crop, null, modifier = Modifier.size(18.dp))
@@ -406,7 +414,7 @@ fun EditScreen(
                 .onSizeChanged { canvasSize = it },
             contentAlignment = Alignment.Center
         ) {
-            val bitmap = page.workingBitmap
+            val bitmap = page.previewBitmap
             if (bitmap != null) {
                 // remember keyed on the bitmap instance — asImageBitmap() creates a GPU
                 // texture upload and must NOT be called on every recomposition (which happens
