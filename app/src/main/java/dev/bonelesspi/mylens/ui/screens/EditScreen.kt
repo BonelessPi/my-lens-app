@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Rotate90DegreesCw
 import androidx.compose.material3.*
@@ -60,6 +61,7 @@ fun EditScreen(
     var cropMode by remember { mutableStateOf(false) }
     var workingCrop by remember { mutableStateOf(CropRect()) }
     var showResetConfirm by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var imageIntrinsicSize by remember { mutableStateOf<IntSize?>(null) }
     var dragTarget by remember { mutableStateOf<DragTarget?>(null) }
@@ -303,6 +305,25 @@ fun EditScreen(
         )
     }
 
+    // ── Delete dialog ─────────────────────────────────────────────────────────
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Remove this page?") },
+            text = { Text("This page will be removed from the document.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    viewModel.removePage(pageId)
+                }) { Text("Remove", color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     // ── Layout ────────────────────────────────────────────────────────────────
 
     Scaffold(
@@ -329,6 +350,13 @@ fun EditScreen(
                         }
                         IconButton(onClick = { showResetConfirm = true }) {
                             Icon(Icons.Default.Refresh, "Reset to original")
+                        }
+                        IconButton(onClick = { showDeleteConfirm = true }) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Delete page",
+                                tint = MaterialTheme.colorScheme.error
+                            )
                         }
                         TextButton(onClick = onBack) {
                             Icon(Icons.Default.Check, null, modifier = Modifier.size(18.dp))

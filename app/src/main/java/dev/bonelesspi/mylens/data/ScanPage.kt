@@ -13,6 +13,9 @@ import java.util.UUID
  *                        truth for the page's edit state. Applied in order to produce both
  *                        the preview bitmap (at preview resolution) and the export bitmap
  *                        (at full resolution decoded fresh from [uri]).
+ * @param originalWidth   Width of the source image in pixels, read via inJustDecodeBounds
+ *                        immediately after the page is added. 0 until populated.
+ * @param originalHeight  Height of the source image in pixels. 0 until populated.
  * @param baseBitmap      The source URI decoded at preview resolution (~720p) with NO actions
  *                        applied. Cached to avoid re-decoding from storage on every undo.
  *                        Null until the page is first opened in EditScreen.
@@ -26,6 +29,8 @@ data class ScanPage(
     val id: String = UUID.randomUUID().toString(),
     val uri: Uri,
     val actions: List<EditAction> = emptyList(),
+    val originalWidth: Int = 0,
+    val originalHeight: Int = 0,
     val baseBitmap: Bitmap? = null,
     val previewBitmap: Bitmap? = null,
     val thumbnailBitmap: Bitmap? = null

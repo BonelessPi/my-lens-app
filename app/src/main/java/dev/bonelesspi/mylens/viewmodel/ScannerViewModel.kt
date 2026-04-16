@@ -2,6 +2,7 @@ package dev.bonelesspi.mylens.viewmodel
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.AndroidViewModel
@@ -52,11 +53,42 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     // ── Page list management ─────────────────────────────────────────────────
 
     fun addPages(uris: List<Uri>) {
-        uris.forEach { pages.add(ScanPage(uri = it)) }
+        uris.forEach { uri ->
+            val page = ScanPage(uri = uri)
+            pages.add(page)
+            loadImageDimensions(page.id, uri)
+        }
     }
 
     fun addPage(uri: Uri) {
-        pages.add(ScanPage(uri = uri))
+        val page = ScanPage(uri = uri)
+        pages.add(page)
+        loadImageDimensions(page.id, uri)
+    }
+
+    /**
+     * Read the source image dimensions without decoding pixel data.
+     * Uses inJustDecodeBounds — fast and uses negligible memory.
+     * Updates the page's originalWidth/originalHeight fields in place.
+     */
+    private fun loadImageDimensions(id: String, uri: Uri) {
+        viewModelScope.launch {
+            val (w, h) = withContext(Dispatchers.IO) {
+                val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                try {
+                    getApplication<Application>().contentResolver.openInputStream(uri)?.use {
+                        BitmapFactory.decodeStream(it, null, opts)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+                Pair(opts.outWidth.coerceAtLeast(0), opts.outHeight.coerceAtLeast(0))
+            }
+            val i = pages.indexOfFirst { it.id == id }
+            if (i != -1) {
+                pages[i] = pages[i].copy(originalWidth = w, originalHeight = h)
+            }
+        }
     }
 
     fun removePage(id: String) {
@@ -133,33 +165,28 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         if (page.baseBitmap != null && page.previewBitmap != null) return
 
         viewModelScope.launch {
-            val base = // Already have base, just need to regenerate preview
+            val base =
                 page.baseBitmap
-                    ?: (// First open — decode from URI
-                            withContext(Dispatchers.IO) {
-                                ImageUtils.decodeUri(getApplication(), page.uri, PREVIEW_RESOLUTION)
-                            } ?: return@launch)
+                    ?: (withContext(Dispatchers.IO) {
+                        ImageUtils.decodeUri(getApplication(), page.uri, PREVIEW_RESOLUTION)
+                    } ?: return@launch)
 
             val preview = applyActions(base, page.actions)
             val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(preview) }
 
             val i = pages.indexOfFirst { it.id == id }
             if (i != -1) {
-                // Recycle old preview and thumbnail if we're replacing them
-                if (pages[i].baseBitmap == null) {
-                    // Fresh base — recycle nothing (preview was null)
-                } else {
+                if (pages[i].baseBitmap != null) {
                     pages[i].previewBitmap?.recycle()
                 }
                 pages[i].thumbnailBitmap?.recycle()
                 pages[i] = pages[i].copy(
-                    baseBitmap     = base,
-                    previewBitmap  = preview,
+                    baseBitmap      = base,
+                    previewBitmap   = preview,
                     thumbnailBitmap = thumbnail
                 )
             } else {
-                // Page removed while we were loading
-                if (page.baseBitmap == null) base.recycle() // we own it
+                if (page.baseBitmap == null) base.recycle()
                 if (preview !== base) preview.recycle()
                 thumbnail.recycle()
             }
@@ -276,7 +303,6 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 ImageUtils.decodeUri(getApplication(), pages[index].uri, PREVIEW_RESOLUTION)
             } ?: return@launch
 
-            // Preview after reset = base with no actions = copy of base
             val newPreview = withContext(Dispatchers.Default) {
                 newBase.copy(newBase.config ?: Bitmap.Config.ARGB_8888, true)
             }

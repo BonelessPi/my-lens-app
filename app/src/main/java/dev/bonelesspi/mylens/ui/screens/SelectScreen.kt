@@ -84,7 +84,7 @@ fun SelectScreen(
     val sheetState = rememberBottomSheetScaffoldState(
         bottomSheetState = rememberStandardBottomSheetState(
             initialValue = SheetValue.PartiallyExpanded,
-            skipHiddenState = true   // sheet is always at least peeking
+            skipHiddenState = true
         )
     )
 
@@ -112,12 +112,30 @@ fun SelectScreen(
         )
     }
 
+    // ── Long-press delete dialog ──────────────────────────────────────────────
+    var pageIdPendingDelete by remember { mutableStateOf<String?>(null) }
+    if (pageIdPendingDelete != null) {
+        val pageNumber = viewModel.pages.indexOfFirst { it.id == pageIdPendingDelete } + 1
+        AlertDialog(
+            onDismissRequest = { pageIdPendingDelete = null },
+            title = { Text("Remove page $pageNumber?") },
+            text = { Text("This page will be removed from the document.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.removePage(pageIdPendingDelete!!)
+                    pageIdPendingDelete = null
+                }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pageIdPendingDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
+
     BottomSheetScaffold(
         scaffoldState = sheetState,
-        // The peek height shows just the drag handle — enough to signal the affordance
         sheetPeekHeight = 64.dp,
         sheetDragHandle = {
-            // Standard Material3 drag handle bar
             Surface(
                 modifier = Modifier.padding(vertical = 10.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
@@ -160,11 +178,9 @@ fun SelectScreen(
             TopAppBar(
                 title = { Text("MyLens") },
                 actions = {
-                    // Settings — always visible
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
-                    // Clear all — only when pages exist
                     if (viewModel.pages.isNotEmpty()) {
                         IconButton(onClick = { showClearConfirm = true }) {
                             Icon(
@@ -174,7 +190,6 @@ fun SelectScreen(
                             )
                         }
                     }
-                    // Export — disabled when no pages, expands sheet when tapped
                     IconButton(
                         onClick = { scope.launch { sheetState.bottomSheetState.expand() } },
                         enabled = viewModel.pages.isNotEmpty()
@@ -230,7 +245,6 @@ fun SelectScreen(
                         start = 16.dp,
                         end = 16.dp,
                         top = 16.dp,
-                        // Extra bottom padding so last item isn't hidden behind FABs + sheet peek
                         bottom = fabBottomPadding + 80.dp
                     ),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -238,12 +252,12 @@ fun SelectScreen(
                     items(items = viewModel.pages, key = { it.id }) { page ->
                         ReorderableItem(reorderableState, key = page.id) { isDragging ->
                             PageCard(
-                                page       = page,
-                                pageNumber = viewModel.pages.indexOf(page) + 1,
-                                onEdit     = { onNavigateToEdit(page.id) },
-                                onDelete   = { viewModel.removePage(page.id) },
-                                isDragging = isDragging,
-                                modifier   = Modifier.fillMaxWidth()
+                                page        = page,
+                                pageNumber  = viewModel.pages.indexOf(page) + 1,
+                                onTap       = { onNavigateToEdit(page.id) },
+                                onLongPress = { pageIdPendingDelete = page.id },
+                                isDragging  = isDragging,
+                                modifier    = Modifier.fillMaxWidth()
                             )
                         }
                     }
@@ -316,7 +330,6 @@ private fun ExportSheetContent(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        // File name
         OutlinedTextField(
             value = fileName,
             onValueChange = onFileNameChange,
@@ -326,7 +339,6 @@ private fun ExportSheetContent(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // Output folder
         OutlinedTextField(
             value = outputFolderLabel,
             onValueChange = {},
@@ -340,7 +352,6 @@ private fun ExportSheetContent(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // Page size
         ExposedDropdownMenuBox(
             expanded = pageSizeMenuExpanded,
             onExpandedChange = { pageSizeMenuExpanded = it }
@@ -368,7 +379,6 @@ private fun ExportSheetContent(
             }
         }
 
-        // Image quality
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -399,7 +409,6 @@ private fun ExportSheetContent(
             }
         }
 
-        // Export state + button
         when (exportState) {
             is ExportState.Building -> {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
