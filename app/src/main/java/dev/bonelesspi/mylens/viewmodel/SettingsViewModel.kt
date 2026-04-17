@@ -40,18 +40,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         initialValue = SettingsRepository.DEFAULT_JPEG_QUALITY
     )
 
-    val defaultPageSize = repository.defaultPageSize.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.Eagerly,
-        initialValue = SettingsRepository.DEFAULT_PAGE_SIZE
-    )
-
-    val outputFolderUri = repository.outputFolderUri.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.Eagerly,
-        initialValue = SettingsRepository.DEFAULT_OUTPUT_FOLDER_URI
-    )
-
     // ── Write actions ─────────────────────────────────────────────────────────
 
     fun setExportResolution(value: Int) {
@@ -68,13 +56,5 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun setJpegQuality(value: Int) {
         viewModelScope.launch { repository.setJpegQuality(value) }
-    }
-
-    fun setDefaultPageSize(value: String) {
-        viewModelScope.launch { repository.setDefaultPageSize(value) }
-    }
-
-    fun setOutputFolderUri(value: String) {
-        viewModelScope.launch { repository.setOutputFolderUri(value) }
     }
 }

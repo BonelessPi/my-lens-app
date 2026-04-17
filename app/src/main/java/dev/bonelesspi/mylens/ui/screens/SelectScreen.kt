@@ -50,11 +50,6 @@ fun SelectScreen(
     val scope = rememberCoroutineScope()
     val exportState by viewModel.exportState.collectAsStateWithLifecycle()
 
-    // ── Settings-derived defaults ─────────────────────────────────────────────
-    val settingsJpegQuality    by settingsViewModel.jpegQuality.collectAsStateWithLifecycle()
-    val settingsDefaultPageSize by settingsViewModel.defaultPageSize.collectAsStateWithLifecycle()
-    val settingsOutputFolderUri by settingsViewModel.outputFolderUri.collectAsStateWithLifecycle()
-
     // ── Photo picker ──────────────────────────────────────────────────────────
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
@@ -62,9 +57,7 @@ fun SelectScreen(
 
     // ── Folder picker (SAF) ───────────────────────────────────────────────────
     // Seed from persisted setting; user can override for this session via the sheet.
-    var outputFolderUri by remember(settingsOutputFolderUri) {
-        mutableStateOf(settingsOutputFolderUri.takeIf { it.isNotEmpty() }?.let { Uri.parse(it) })
-    }
+    var outputFolderUri by remember { mutableStateOf<Uri?>(null) }
     val outputFolderLabel by remember(outputFolderUri) {
         derivedStateOf {
             outputFolderUri?.lastPathSegment?.substringAfterLast(':') ?: "Documents"
@@ -80,8 +73,6 @@ fun SelectScreen(
                         android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
             outputFolderUri = uri
-            // Persist the new folder as the new default
-            settingsViewModel.setOutputFolderUri(uri.toString())
         }
     }
 
@@ -101,12 +92,7 @@ fun SelectScreen(
 
     // ── Export settings state — seeded from persisted settings ────────────────
     var fileName by remember { mutableStateOf("scan") }
-    var selectedPageSize by remember(settingsDefaultPageSize) {
-        mutableStateOf(PageSize.entries.firstOrNull { it.name == settingsDefaultPageSize } ?: PageSize.A4)
-    }
-    var jpegQuality by remember(settingsJpegQuality) {
-        mutableFloatStateOf(settingsJpegQuality.toFloat())
-    }
+    var selectedPageSize by remember { mutableStateOf(PageSize.A4) }
 
     // ── Clear all dialog ──────────────────────────────────────────────────────
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -166,8 +152,6 @@ fun SelectScreen(
                 onFileNameChange  = { fileName = it },
                 selectedPageSize  = selectedPageSize,
                 onPageSizeChange  = { selectedPageSize = it },
-                jpegQuality       = jpegQuality,
-                onQualityChange   = { jpegQuality = it },
                 outputFolderLabel = outputFolderLabel,
                 onChooseFolder    = {
                     folderPicker.launch(
@@ -184,7 +168,7 @@ fun SelectScreen(
                         outputDir = outputDir,
                         fileName  = safeName,
                         pageSize  = selectedPageSize,
-                        quality   = jpegQuality.toInt()
+                        quality   = settingsViewModel.jpegQuality.value
                     )
                 }
             )
@@ -321,8 +305,6 @@ private fun ExportSheetContent(
     onFileNameChange: (String) -> Unit,
     selectedPageSize: PageSize,
     onPageSizeChange: (PageSize) -> Unit,
-    jpegQuality: Float,
-    onQualityChange: (Float) -> Unit,
     outputFolderLabel: String,
     onChooseFolder: () -> Unit,
     pageCount: Int,
@@ -391,36 +373,6 @@ private fun ExportSheetContent(
                         onClick = { onPageSizeChange(size); pageSizeMenuExpanded = false }
                     )
                 }
-            }
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Image quality", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "${jpegQuality.toInt()}%",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-            Slider(
-                value = jpegQuality,
-                onValueChange = onQualityChange,
-                valueRange = 50f..100f,
-                steps = 9,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Smaller file", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outlineVariant)
-                Text("Best quality", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
 

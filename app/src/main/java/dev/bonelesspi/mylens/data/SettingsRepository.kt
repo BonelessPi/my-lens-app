@@ -5,7 +5,6 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -33,19 +32,11 @@ class SettingsRepository(private val context: Context) {
         // JPEG quality 50–100
         val KEY_JPEG_QUALITY          = intPreferencesKey("jpeg_quality")
 
-        // PageSize enum name, e.g. "A4", "LETTER"
-        val KEY_DEFAULT_PAGE_SIZE     = stringPreferencesKey("default_page_size")
-
-        // SAF URI string for the default output folder, empty = Documents
-        val KEY_OUTPUT_FOLDER_URI     = stringPreferencesKey("output_folder_uri")
-
         // ── Defaults ──────────────────────────────────────────────────────────
         const val DEFAULT_EXPORT_RESOLUTION    = 4096
         const val DEFAULT_PREVIEW_RESOLUTION   = 1280
         const val DEFAULT_THUMBNAIL_RESOLUTION = 144
         const val DEFAULT_JPEG_QUALITY         = 90
-        const val DEFAULT_PAGE_SIZE            = "A4"
-        const val DEFAULT_OUTPUT_FOLDER_URI    = ""
     }
 
     // ── Flows ─────────────────────────────────────────────────────────────────
@@ -66,14 +57,6 @@ class SettingsRepository(private val context: Context) {
         it[KEY_JPEG_QUALITY] ?: DEFAULT_JPEG_QUALITY
     }
 
-    val defaultPageSize: Flow<String> = context.dataStore.data.map {
-        it[KEY_DEFAULT_PAGE_SIZE] ?: DEFAULT_PAGE_SIZE
-    }
-
-    val outputFolderUri: Flow<String> = context.dataStore.data.map {
-        it[KEY_OUTPUT_FOLDER_URI] ?: DEFAULT_OUTPUT_FOLDER_URI
-    }
-
     // ── Writers ───────────────────────────────────────────────────────────────
 
     suspend fun setExportResolution(value: Int) {
@@ -90,13 +73,5 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setJpegQuality(value: Int) {
         context.dataStore.edit { it[KEY_JPEG_QUALITY] = value }
-    }
-
-    suspend fun setDefaultPageSize(value: String) {
-        context.dataStore.edit { it[KEY_DEFAULT_PAGE_SIZE] = value }
-    }
-
-    suspend fun setOutputFolderUri(value: String) {
-        context.dataStore.edit { it[KEY_OUTPUT_FOLDER_URI] = value }
     }
 }

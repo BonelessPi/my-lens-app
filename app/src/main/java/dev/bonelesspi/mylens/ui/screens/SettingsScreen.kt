@@ -1,24 +1,18 @@
 package dev.bonelesspi.mylens.ui.screens
 
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.bonelesspi.mylens.viewmodel.SettingsViewModel
-import androidx.core.net.toUri
 
 // ── Named resolution presets ──────────────────────────────────────────────────
 
@@ -32,16 +26,16 @@ val EXPORT_RESOLUTION_OPTIONS = listOf(
 )
 
 private val PREVIEW_RESOLUTION_OPTIONS = listOf(
-    ResolutionOption("Low (720 px)",    720),
+    ResolutionOption("Low (720 px)",     720),
     ResolutionOption("Medium (1280 px)", 1280),
-    ResolutionOption("High (1920 px)",  1920)
+    ResolutionOption("High (1920 px)",   1920)
 )
 
 private val THUMBNAIL_RESOLUTION_OPTIONS = listOf(
-    ResolutionOption("Small (96 px)",   96),
-    ResolutionOption("Medium (144 px)", 144),
-    ResolutionOption("Large (240 px)",  240),
-    ResolutionOption("Maximum (360 px)",  360)
+    ResolutionOption("Small (96 px)",    96),
+    ResolutionOption("Medium (144 px)",  144),
+    ResolutionOption("Large (240 px)",   240),
+    ResolutionOption("Maximum (360 px)", 360)
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -50,33 +44,10 @@ fun SettingsScreen(
     onBack: () -> Unit,
     viewModel: SettingsViewModel = viewModel()
 ) {
-    val context = LocalContext.current
-
     val exportResolution    by viewModel.exportResolution.collectAsStateWithLifecycle()
     val previewResolution   by viewModel.previewResolution.collectAsStateWithLifecycle()
     val thumbnailResolution by viewModel.thumbnailResolution.collectAsStateWithLifecycle()
     val jpegQuality         by viewModel.jpegQuality.collectAsStateWithLifecycle()
-    val defaultPageSize     by viewModel.defaultPageSize.collectAsStateWithLifecycle()
-    val outputFolderUri     by viewModel.outputFolderUri.collectAsStateWithLifecycle()
-
-    val outputFolderLabel = outputFolderUri
-        .takeIf { it.isNotEmpty() }
-        ?.let { it.toUri().lastPathSegment?.substringAfterLast(':') }
-        ?: "Documents"
-
-    // ── Folder picker ─────────────────────────────────────────────────────────
-    val folderPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-            viewModel.setOutputFolderUri(uri.toString())
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -101,7 +72,6 @@ fun SettingsScreen(
         ) {
             Spacer(Modifier.height(4.dp))
 
-            // ── Export resolution ─────────────────────────────────────────────
             DropdownSetting(
                 label = "Export resolution",
                 options = EXPORT_RESOLUTION_OPTIONS,
@@ -109,7 +79,6 @@ fun SettingsScreen(
                 onSelect = { viewModel.setExportResolution(it) }
             )
 
-            // ── Preview resolution ────────────────────────────────────────────
             DropdownSetting(
                 label = "Preview resolution",
                 options = PREVIEW_RESOLUTION_OPTIONS,
@@ -117,7 +86,6 @@ fun SettingsScreen(
                 onSelect = { viewModel.setPreviewResolution(it) }
             )
 
-            // ── Thumbnail resolution ──────────────────────────────────────────
             DropdownSetting(
                 label = "Thumbnail resolution",
                 options = THUMBNAIL_RESOLUTION_OPTIONS,
@@ -156,33 +124,6 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
-
-            // ── Default page size ─────────────────────────────────────────────
-            DropdownSettingRaw(
-                label = "Default page size",
-                options = PageSize.entries.map { it.name to it.label },
-                selectedKey = defaultPageSize,
-                onSelect = { viewModel.setDefaultPageSize(it) }
-            )
-
-            // ── Default output folder ─────────────────────────────────────────
-            OutlinedTextField(
-                value = outputFolderLabel,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Default save folder") },
-                trailingIcon = {
-                    IconButton(onClick = {
-                        folderPicker.launch(
-                            (outputFolderUri.takeIf { it.isNotEmpty() }
-                                ?: "content://com.android.externalstorage.documents/tree/primary:Documents").toUri()
-                        )
-                    }) {
-                        Icon(Icons.Default.Folder, "Choose folder")
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
         }
     }
 }
@@ -217,41 +158,6 @@ private fun DropdownSetting(
                 DropdownMenuItem(
                     text = { Text(option.label) },
                     onClick = { onSelect(option.pixels); expanded = false }
-                )
-            }
-        }
-    }
-}
-
-// ── Reusable dropdown for string-keyed options (e.g. PageSize) ───────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DropdownSettingRaw(
-    label: String,
-    options: List<Pair<String, String>>,   // key to display label
-    selectedKey: String,
-    onSelect: (String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val selectedLabel = options.firstOrNull { it.first == selectedKey }?.second ?: selectedKey
-
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
-        OutlinedTextField(
-            value = selectedLabel,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text(label) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(MenuAnchorType.PrimaryEditable, true)
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { (key, displayLabel) ->
-                DropdownMenuItem(
-                    text = { Text(displayLabel) },
-                    onClick = { onSelect(key); expanded = false }
                 )
             }
         }
