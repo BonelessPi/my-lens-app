@@ -326,13 +326,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             _exportState.value = ExportState.Building
             try {
                 val file = PdfBuilder.build(
-                    context          = getApplication(),
-                    pages            = pages.toList(),
-                    outputDir        = outputDir,
-                    fileName         = fileName,
-                    pageSize         = pageSize,
-                    quality          = quality,
-                    exportResolution = exportResolution.value
+                    context                 = getApplication(),
+                    pages                   = pages.toList(),
+                    outputDir               = outputDir,
+                    fileName                = fileName,
+                    pageSize                = pageSize,
+                    globalQuality           = quality,
+                    globalExportResolution  = exportResolution.value
                 )
                 _exportState.value = ExportState.Done(file)
             } catch (e: Exception) {
@@ -343,5 +343,27 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     fun resetExportState() {
         _exportState.value = ExportState.Idle
+    }
+
+    // ── Per-page overrides ────────────────────────────────────────────────────
+
+    /**
+     * Set or clear the per-page export resolution override.
+     * Pass null to revert to the global setting default.
+     */
+    fun setPageExportResolution(id: String, resolution: Int?) {
+        val index = pages.indexOfFirst { it.id == id }
+        if (index == -1) return
+        pages[index] = pages[index].copy(exportResolution = resolution)
+    }
+
+    /**
+     * Set or clear the per-page JPEG quality override.
+     * Pass null to revert to the global setting default.
+     */
+    fun setPageJpegQuality(id: String, quality: Int?) {
+        val index = pages.indexOfFirst { it.id == id }
+        if (index == -1) return
+        pages[index] = pages[index].copy(jpegQuality = quality)
     }
 }

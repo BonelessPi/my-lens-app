@@ -24,11 +24,13 @@ object PdfBuilder {
     /**
      * Build a PDF from the given pages.
      *
-     * For each page, decodes the source URI fresh at [exportResolution] and applies
-     * the page's action list at full quality. This ensures exported PDFs are always
-     * at maximum quality regardless of the preview resolution used during editing.
+     * For each page, decodes the source URI fresh at the effective export resolution
+     * and applies the page's action list at full quality. Per-page overrides for
+     * [exportResolution] and [quality] take precedence over the global defaults.
+     * A null override on a page means "use the global default".
      *
-     * Pages with no actions are simply decoded and encoded directly.
+     * @param globalExportResolution  Fallback export resolution when a page has no override.
+     * @param globalQuality           Fallback JPEG quality when a page has no override.
      */
     suspend fun build(
         context: Context,
@@ -36,8 +38,8 @@ object PdfBuilder {
         outputDir: File,
         fileName: String,
         pageSize: PageSize = PageSize.A4,
-        quality: Int = 90,
-        exportResolution: Int = 4096
+        globalQuality: Int = 90,
+        globalExportResolution: Int = 4096
     ): File = withContext(Dispatchers.IO) {
 
         val cacheFile = File(context.cacheDir, fileName)
@@ -48,24 +50,26 @@ object PdfBuilder {
         document.setMargins(0f, 0f, 0f, 0f)
 
         pages.forEach { page ->
-            // Always decode fresh from URI at full export resolution
+            // Resolve effective values — page override takes precedence over global default
+            val effectiveResolution = page.exportResolution ?: globalExportResolution
+            val effectiveQuality    = page.jpegQuality      ?: globalQuality
+
             var bitmap = ImageUtils.decodeUri(
-                context, page.uri, maxDimension = exportResolution
+                context, page.uri, maxDimension = effectiveResolution
             ) ?: return@forEach
 
-            // Apply the action stack at full resolution
             for (action in page.actions) {
                 val next = when (action) {
                     is EditAction.Rotate -> ImageUtils.rotateBitmap(bitmap, 90)
                     is EditAction.Warp   -> CropUtils.warpPerspective(
-                        bitmap, action.crop, outputMaxDim = exportResolution
+                        bitmap, action.crop, outputMaxDim = effectiveResolution
                     )
                 }
                 bitmap.recycle()
                 bitmap = next
             }
 
-            val bytes = bitmapToJpegBytes(bitmap, quality)
+            val bytes = bitmapToJpegBytes(bitmap, effectiveQuality)
             val (pdfW, pdfH) = resolvePageSize(pageSize, bitmap.width.toFloat(), bitmap.height.toFloat())
             bitmap.recycle()
 

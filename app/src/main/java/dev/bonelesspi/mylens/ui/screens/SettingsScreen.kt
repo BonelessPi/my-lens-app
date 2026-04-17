@@ -18,12 +18,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.bonelesspi.mylens.viewmodel.SettingsViewModel
+import androidx.core.net.toUri
 
 // ── Named resolution presets ──────────────────────────────────────────────────
 
-private data class ResolutionOption(val label: String, val pixels: Int)
+data class ResolutionOption(val label: String, val pixels: Int)
 
-private val EXPORT_RESOLUTION_OPTIONS = listOf(
+val EXPORT_RESOLUTION_OPTIONS = listOf(
     ResolutionOption("Low (1024 px)",     1024),
     ResolutionOption("Medium (2048 px)",  2048),
     ResolutionOption("High (3072 px)",    3072),
@@ -39,7 +40,8 @@ private val PREVIEW_RESOLUTION_OPTIONS = listOf(
 private val THUMBNAIL_RESOLUTION_OPTIONS = listOf(
     ResolutionOption("Small (96 px)",   96),
     ResolutionOption("Medium (144 px)", 144),
-    ResolutionOption("Large (192 px)",  192)
+    ResolutionOption("Large (240 px)",  240),
+    ResolutionOption("Maximum (360 px)",  360)
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,7 +61,7 @@ fun SettingsScreen(
 
     val outputFolderLabel = outputFolderUri
         .takeIf { it.isNotEmpty() }
-        ?.let { Uri.parse(it).lastPathSegment?.substringAfterLast(':') }
+        ?.let { it.toUri().lastPathSegment?.substringAfterLast(':') }
         ?: "Documents"
 
     // ── Folder picker ─────────────────────────────────────────────────────────
@@ -172,10 +174,8 @@ fun SettingsScreen(
                 trailingIcon = {
                     IconButton(onClick = {
                         folderPicker.launch(
-                            Uri.parse(
-                                outputFolderUri.takeIf { it.isNotEmpty() }
-                                    ?: "content://com.android.externalstorage.documents/tree/primary:Documents"
-                            )
+                            (outputFolderUri.takeIf { it.isNotEmpty() }
+                                ?: "content://com.android.externalstorage.documents/tree/primary:Documents").toUri()
                         )
                     }) {
                         Icon(Icons.Default.Folder, "Choose folder")

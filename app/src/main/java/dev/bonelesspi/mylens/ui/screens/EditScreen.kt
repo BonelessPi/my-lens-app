@@ -11,11 +11,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Rotate90DegreesCw
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,11 +33,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import dev.bonelesspi.mylens.data.CropRect
 import dev.bonelesspi.mylens.viewmodel.ScannerViewModel
+import dev.bonelesspi.mylens.viewmodel.SettingsViewModel
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sqrt
 
@@ -53,10 +56,16 @@ private sealed class DragTarget {
 fun EditScreen(
     pageId: String,
     onBack: () -> Unit,
-    viewModel: ScannerViewModel = viewModel()
+    viewModel: ScannerViewModel = viewModel(),
+    settingsViewModel: SettingsViewModel = viewModel()
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val page = viewModel.pages.firstOrNull { it.id == pageId } ?: run { onBack(); return }
+
+    // Global defaults from settings — used as display hints and seed values
+    val globalExportResolution by settingsViewModel.exportResolution.collectAsStateWithLifecycle()
+    val globalJpegQuality      by settingsViewModel.jpegQuality.collectAsStateWithLifecycle()
 
     var cropMode by remember { mutableStateOf(false) }
     var workingCrop by remember { mutableStateOf(CropRect()) }
@@ -65,15 +74,38 @@ fun EditScreen(
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var imageIntrinsicSize by remember { mutableStateOf<IntSize?>(null) }
     var dragTarget by remember { mutableStateOf<DragTarget?>(null) }
-    // Last touch position in normalized space, used to compute body drag deltas
     var lastDragNorm by remember { mutableStateOf(Pair(0f, 0f)) }
 
+    // ── Page settings sheet state ─────────────────────────────────────────────
+    val pageSettingsSheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true
+    )
+    var showPageSettings by remember { mutableStateOf(false) }
+
+    // Override switch states — initialized from the page's current stored overrides
+    var resolutionOverrideEnabled by remember(page.exportResolution) {
+        mutableStateOf(page.exportResolution != null)
+    }
+    var qualityOverrideEnabled by remember(page.jpegQuality) {
+        mutableStateOf(page.jpegQuality != null)
+    }
+
+    // Selector values — seeded from the page override if present, else the global default.
+    // These are local working copies; they are only written back to the ViewModel when the
+    // corresponding switch is on. This prevents confusing a manual "90" from an inherited "90".
+    var resolutionSelectorValue by remember(page.exportResolution, globalExportResolution) {
+        mutableIntStateOf(page.exportResolution ?: globalExportResolution)
+    }
+    var qualitySelectorValue by remember(page.jpegQuality, globalJpegQuality) {
+        mutableIntStateOf(page.jpegQuality ?: globalJpegQuality)
+    }
+
     val density = LocalDensity.current
-    val cornerHitPx    = with(density) { 44.dp.toPx() }
-    val sideHitPx      = with(density) { 28.dp.toPx() }
-    val drawRadiusPx   = with(density) { 7.dp.toPx() }
-    val armLengthPx    = with(density) { 18.dp.toPx() }
-    val armWidthPx     = with(density) { 3.dp.toPx() }
+    val cornerHitPx     = with(density) { 44.dp.toPx() }
+    val sideHitPx       = with(density) { 28.dp.toPx() }
+    val drawRadiusPx    = with(density) { 7.dp.toPx() }
+    val armLengthPx     = with(density) { 18.dp.toPx() }
+    val armWidthPx      = with(density) { 3.dp.toPx() }
     val sideDotRadiusPx = with(density) { 5.dp.toPx() }
 
     LaunchedEffect(pageId) { viewModel.ensurePreview(pageId) }
@@ -123,7 +155,6 @@ fun EditScreen(
     fun findDragTarget(touch: Offset, crop: CropRect): DragTarget {
         val corners = listOf(crop.topLeft, crop.topRight, crop.bottomRight, crop.bottomLeft)
 
-        // Corners first (highest priority)
         var bestCorner: Int? = null
         var bestCornerDist = cornerHitPx
         corners.forEachIndexed { i, (nx, ny) ->
@@ -132,7 +163,6 @@ fun EditScreen(
         }
         if (bestCorner != null) return DragTarget.Corner(bestCorner!!)
 
-        // Side midpoints
         var bestSide: Int? = null
         var bestSideDist = sideHitPx
         for (i in 0..3) {
@@ -141,15 +171,12 @@ fun EditScreen(
         }
         if (bestSide != null) return DragTarget.Side(bestSide!!)
 
-        // Body — check if touch is inside the quad using cross-product winding
         val tl = normToCanvas(crop.topLeft.first,     crop.topLeft.second)
         val tr = normToCanvas(crop.topRight.first,    crop.topRight.second)
         val br = normToCanvas(crop.bottomRight.first, crop.bottomRight.second)
         val bl = normToCanvas(crop.bottomLeft.first,  crop.bottomLeft.second)
         if (pointInQuad(touch, tl, tr, br, bl)) return DragTarget.Body
 
-        // Nothing hit — still return Body so a missed touch near the quad pans it
-        // rather than doing nothing
         return DragTarget.Body
     }
 
@@ -166,48 +193,29 @@ fun EditScreen(
         }
     }
 
-    /**
-     * Rail-constrained side drag.
-     *
-     * For a given side, each of its two corners must stay on its adjacent rail edge.
-     * The rail for a corner is the line defined by that corner and its non-shared neighbour.
-     *
-     * Example: top side (TL and TR).
-     *   - TL's rail is the left edge, direction = BL - TL
-     *   - TR's rail is the right edge, direction = BR - TR
-     *
-     * We compute how far to push each corner along its rail so that the component of
-     * motion perpendicular to the dragged side matches the user's drag.
-     *
-     * Bounds handling: compute the unclamped t for each corner. Find the maximum t
-     * both corners can move while staying in [0,1]². Apply the smaller t to both,
-     * preserving the angle relationship.
-     */
     fun applySideDrag(
         sideIndex: Int,
         dragDeltaNx: Float,
         dragDeltaNy: Float,
         crop: CropRect
     ): CropRect {
-        // Identify the two corners and their rails for this side
-        // Each entry: (corner normalized pos, rail direction normalized)
         val (c0, c1, rail0, rail1) = when (sideIndex) {
-            0 -> SideData(  // top: TL and TR, rails = left edge and right edge
+            0 -> SideData(
                 crop.topLeft,    crop.topRight,
                 vecSub(crop.bottomLeft,  crop.topLeft),
                 vecSub(crop.bottomRight, crop.topRight)
             )
-            1 -> SideData(  // right: TR and BR, rails = top edge and bottom edge
+            1 -> SideData(
                 crop.topRight,    crop.bottomRight,
                 vecSub(crop.topLeft,    crop.topRight),
                 vecSub(crop.bottomLeft, crop.bottomRight)
             )
-            2 -> SideData(  // bottom: BR and BL, rails = right edge and left edge
+            2 -> SideData(
                 crop.bottomRight, crop.bottomLeft,
                 vecSub(crop.topRight, crop.bottomRight),
                 vecSub(crop.topLeft,  crop.bottomLeft)
             )
-            3 -> SideData(  // left: BL and TL, rails = bottom edge and top edge
+            3 -> SideData(
                 crop.bottomLeft, crop.topLeft,
                 vecSub(crop.bottomRight, crop.bottomLeft),
                 vecSub(crop.topRight,    crop.topLeft)
@@ -216,29 +224,18 @@ fun EditScreen(
         }
 
         val drag = Pair(dragDeltaNx, dragDeltaNy)
-
-        // Project drag onto each corner's rail to find parameter t
-        // t is the scalar along the rail direction that achieves the drag displacement
         val t0 = projectDragOntoRail(drag, rail0)
         val t1 = projectDragOntoRail(drag, rail1)
-
-        // If both projections are degenerate (rail perpendicular to drag), nothing moves
         if (t0 == null && t1 == null) return crop
 
         val rawT0 = t0 ?: 0f
         val rawT1 = t1 ?: 0f
 
-        // Compute unclamped new positions
-        val new0 = Pair(c0.first + rawT0 * rail0.first, c0.second + rawT0 * rail0.second)
-        val new1 = Pair(c1.first + rawT1 * rail1.first, c1.second + rawT1 * rail1.second)
-
-        // Check bounds — find the largest fraction of t we can apply while staying in [0,1]²
         val maxFraction = minOf(
             maxTFraction(c0, rail0, rawT0),
             maxTFraction(c1, rail1, rawT1)
         )
-
-        if (maxFraction <= 0f) return crop  // Already at boundary in this direction
+        if (maxFraction <= 0f) return crop
 
         val clampedT0 = rawT0 * maxFraction
         val clampedT1 = rawT1 * maxFraction
@@ -253,29 +250,24 @@ fun EditScreen(
         )
 
         return when (sideIndex) {
-            0 -> crop.copy(topLeft = final0,    topRight    = final1)
-            1 -> crop.copy(topRight = final0,   bottomRight = final1)
-            2 -> crop.copy(bottomRight = final0, bottomLeft = final1)
-            3 -> crop.copy(bottomLeft = final0,  topLeft    = final1)
+            0 -> crop.copy(topLeft = final0,     topRight    = final1)
+            1 -> crop.copy(topRight = final0,    bottomRight = final1)
+            2 -> crop.copy(bottomRight = final0, bottomLeft  = final1)
+            3 -> crop.copy(bottomLeft = final0,  topLeft     = final1)
             else -> crop
         }
     }
 
     fun applyBodyDrag(dragDeltaNx: Float, dragDeltaNy: Float, crop: CropRect): CropRect {
-        // Compute the maximum delta that keeps all corners in [0,1]²
         val corners = listOf(crop.topLeft, crop.topRight, crop.bottomRight, crop.bottomLeft)
-
-        // Find the actual allowed delta — limited by whichever corner hits a wall first
         val allowedDx = if (dragDeltaNx > 0f)
             minOf(dragDeltaNx, corners.minOf { 1f - it.first })
         else
             maxOf(dragDeltaNx, -corners.minOf { it.first })
-
         val allowedDy = if (dragDeltaNy > 0f)
             minOf(dragDeltaNy, corners.minOf { 1f - it.second })
         else
             maxOf(dragDeltaNy, -corners.minOf { it.second })
-
         return CropRect(
             topLeft     = Pair(crop.topLeft.first     + allowedDx, crop.topLeft.second     + allowedDy),
             topRight    = Pair(crop.topRight.first    + allowedDx, crop.topRight.second    + allowedDy),
@@ -284,7 +276,7 @@ fun EditScreen(
         )
     }
 
-    // ── Reset dialog ──────────────────────────────────────────────────────────
+    // ── Dialogs ───────────────────────────────────────────────────────────────
 
     if (showResetConfirm) {
         AlertDialog(
@@ -305,8 +297,6 @@ fun EditScreen(
         )
     }
 
-    // ── Delete dialog ─────────────────────────────────────────────────────────
-
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
@@ -316,12 +306,151 @@ fun EditScreen(
                 TextButton(onClick = {
                     showDeleteConfirm = false
                     viewModel.removePage(pageId)
-                }) { Text("Remove", color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
+                }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
             }
         )
+    }
+
+    // ── Page settings bottom sheet ────────────────────────────────────────────
+
+    if (showPageSettings) {
+        ModalBottomSheet(
+            onDismissRequest = { showPageSettings = false },
+            sheetState = pageSettingsSheetState
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                Text("Page settings", style = MaterialTheme.typography.titleLarge)
+
+                // ── Export resolution ─────────────────────────────────────────
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Export resolution", style = MaterialTheme.typography.bodyLarge)
+                        Switch(
+                            checked = resolutionOverrideEnabled,
+                            onCheckedChange = { enabled ->
+                                resolutionOverrideEnabled = enabled
+                                if (enabled) {
+                                    // Seed selector with global default when first enabled
+                                    // so the user starts from a sensible value
+                                    resolutionSelectorValue = globalExportResolution
+                                    viewModel.setPageExportResolution(pageId, resolutionSelectorValue)
+                                } else {
+                                    viewModel.setPageExportResolution(pageId, null)
+                                }
+                            }
+                        )
+                    }
+                    ResolutionDropdown(
+                        options = EXPORT_RESOLUTION_OPTIONS,
+                        selectedPixels = resolutionSelectorValue,
+                        globalPixels = globalExportResolution,
+                        enabled = resolutionOverrideEnabled,
+                        onSelect = { pixels ->
+                            resolutionSelectorValue = pixels
+                            if (resolutionOverrideEnabled) {
+                                viewModel.setPageExportResolution(pageId, pixels)
+                            }
+                        }
+                    )
+                }
+
+                HorizontalDivider()
+
+                // ── JPEG quality ──────────────────────────────────────────────
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("JPEG quality", style = MaterialTheme.typography.bodyLarge)
+                        Switch(
+                            checked = qualityOverrideEnabled,
+                            onCheckedChange = { enabled ->
+                                qualityOverrideEnabled = enabled
+                                if (enabled) {
+                                    qualitySelectorValue = globalJpegQuality
+                                    viewModel.setPageJpegQuality(pageId, qualitySelectorValue)
+                                } else {
+                                    viewModel.setPageJpegQuality(pageId, null)
+                                }
+                            }
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (qualityOverrideEnabled)
+                                "$qualitySelectorValue%"
+                            else
+                                "Default ($globalJpegQuality%)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (qualityOverrideEnabled)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Slider(
+                        value = qualitySelectorValue.toFloat(),
+                        onValueChange = { value ->
+                            qualitySelectorValue = value.toInt()
+                            if (qualityOverrideEnabled) {
+                                viewModel.setPageJpegQuality(pageId, qualitySelectorValue)
+                            }
+                        },
+                        valueRange = 50f..100f,
+                        steps = 9,
+                        enabled = qualityOverrideEnabled,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Smaller file", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outlineVariant)
+                        Text("Best quality", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+
+                HorizontalDivider()
+
+                // ── Reset both overrides ──────────────────────────────────────
+                OutlinedButton(
+                    onClick = {
+                        resolutionOverrideEnabled = false
+                        qualityOverrideEnabled = false
+                        resolutionSelectorValue = globalExportResolution
+                        qualitySelectorValue = globalJpegQuality
+                        viewModel.setPageExportResolution(pageId, null)
+                        viewModel.setPageJpegQuality(pageId, null)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = resolutionOverrideEnabled || qualityOverrideEnabled
+                ) {
+                    Text("Reset to defaults")
+                }
+            }
+        }
     }
 
     // ── Layout ────────────────────────────────────────────────────────────────
@@ -341,7 +470,6 @@ fun EditScreen(
                 },
                 actions = {
                     if (!cropMode) {
-                        // Undo — only enabled when there are actions to undo
                         IconButton(
                             onClick = { viewModel.undoLastAction(pageId) },
                             enabled = page.actions.isNotEmpty()
@@ -358,10 +486,11 @@ fun EditScreen(
                                 tint = MaterialTheme.colorScheme.error
                             )
                         }
-                        TextButton(onClick = onBack) {
-                            Icon(Icons.Default.Check, null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Done")
+                        IconButton(onClick = {
+                            scope.launch { pageSettingsSheetState.show() }
+                            showPageSettings = true
+                        }) {
+                            Icon(Icons.Default.Tune, contentDescription = "Page settings")
                         }
                     }
                 }
@@ -437,18 +566,13 @@ fun EditScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                // Inset image 5% on each side so crop handles near the edges are easy to reach
                 .padding(horizontal = 20.dp)
                 .onSizeChanged { canvasSize = it },
             contentAlignment = Alignment.Center
         ) {
             val bitmap = page.previewBitmap
             if (bitmap != null) {
-                // remember keyed on the bitmap instance — asImageBitmap() creates a GPU
-                // texture upload and must NOT be called on every recomposition (which happens
-                // every frame during drag). Only recreate when the underlying Bitmap changes.
                 val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
-                // Keep intrinsic size in sync whenever bitmap changes
                 LaunchedEffect(bitmap) {
                     imageIntrinsicSize = IntSize(bitmap.width, bitmap.height)
                 }
@@ -486,7 +610,6 @@ fun EditScreen(
                                 onDragStart = { offset ->
                                     val target = findDragTarget(offset, workingCrop)
                                     dragTarget = target
-                                    // Record starting position in norm space for body drag
                                     lastDragNorm = canvasToNorm(offset.x, offset.y)
                                 },
                                 onDrag = { change, _ ->
@@ -498,22 +621,15 @@ fun EditScreen(
                                     workingCrop = when (target) {
                                         is DragTarget.Corner ->
                                             applyCornerDrag(target.index, cx, cy, workingCrop)
-
                                         is DragTarget.Side -> {
                                             val (lastNx, lastNy) = lastDragNorm
-                                            val dNx = curNx - lastNx
-                                            val dNy = curNy - lastNy
-                                            applySideDrag(target.index, dNx, dNy, workingCrop)
+                                            applySideDrag(target.index, curNx - lastNx, curNy - lastNy, workingCrop)
                                         }
-
                                         is DragTarget.Body -> {
                                             val (lastNx, lastNy) = lastDragNorm
-                                            val dNx = curNx - lastNx
-                                            val dNy = curNy - lastNy
-                                            applyBodyDrag(dNx, dNy, workingCrop)
+                                            applyBodyDrag(curNx - lastNx, curNy - lastNy, workingCrop)
                                         }
                                     }
-
                                     lastDragNorm = Pair(curNx, curNy)
                                 },
                                 onDragEnd = { dragTarget = null }
@@ -533,7 +649,6 @@ fun EditScreen(
                     drawPath(quadPath, Color(0x2200AAFF))
                     drawPath(quadPath, Color(0xFF0088FF), style = Stroke(width = 2.dp.toPx()))
 
-                    // Corner handles
                     listOf(tl, tr, br, bl).forEachIndexed { i, pt ->
                         val active = dragTarget is DragTarget.Corner &&
                                 (dragTarget as DragTarget.Corner).index == i
@@ -545,7 +660,6 @@ fun EditScreen(
                         drawCircle(color, drawRadiusPx, pt)
                     }
 
-                    // Side midpoint handles
                     for (i in 0..3) {
                         val mid = sideMidpoint(workingCrop, i)
                         val active = dragTarget is DragTarget.Side &&
@@ -556,6 +670,52 @@ fun EditScreen(
                             style = Stroke(width = 1.5.dp.toPx()))
                     }
                 }
+            }
+        }
+    }
+}
+
+// ── Resolution dropdown for the page settings sheet ──────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ResolutionDropdown(
+    options: List<ResolutionOption>,
+    selectedPixels: Int,
+    globalPixels: Int,
+    enabled: Boolean,
+    onSelect: (Int) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val displayLabel = if (enabled) {
+        options.firstOrNull { it.pixels == selectedPixels }?.label ?: "$selectedPixels px"
+    } else {
+        "Default (${options.firstOrNull { it.pixels == globalPixels }?.label ?: "$globalPixels px"})"
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded && enabled,
+        onExpandedChange = { if (enabled) expanded = it }
+    ) {
+        OutlinedTextField(
+            value = displayLabel,
+            onValueChange = {},
+            readOnly = true,
+            enabled = enabled,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded && enabled) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(MenuAnchorType.PrimaryEditable, true)
+        )
+        ExposedDropdownMenu(
+            expanded = expanded && enabled,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.label) },
+                    onClick = { onSelect(option.pixels); expanded = false }
+                )
             }
         }
     }
@@ -576,66 +736,36 @@ private fun vecSub(a: Pair<Float, Float>, b: Pair<Float, Float>) =
 private fun dot(a: Pair<Float, Float>, b: Pair<Float, Float>) =
     a.first * b.first + a.second * b.second
 
-/**
- * Given a drag vector and a rail direction, find the scalar t such that
- * moving along the rail by t achieves the same component of displacement
- * as the drag vector in the direction perpendicular to the rail.
- *
- * Equivalently: t = dot(drag, railPerp) / dot(rail, railPerp)
- *             = dot(drag, railPerp) / |rail|²
- * where railPerp is the rail rotated 90°.
- *
- * Returns null if the rail is near-zero length (degenerate).
- */
 private fun projectDragOntoRail(
     drag: Pair<Float, Float>,
     rail: Pair<Float, Float>
 ): Float? {
     val railLenSq = dot(rail, rail)
     if (railLenSq < 1e-8f) return null
-    // Project drag onto rail direction: t = dot(drag, rail) / |rail|²
     return dot(drag, rail) / railLenSq
 }
 
-/**
- * Find the maximum fraction of t that can be applied to a corner moving along
- * its rail while keeping it within [0,1]². Returns a value in [0,1].
- *
- * If t is 0 or the corner is already at a boundary in the direction of motion,
- * returns 0.0 to block movement.
- */
 private fun maxTFraction(
     corner: Pair<Float, Float>,
     rail: Pair<Float, Float>,
     t: Float
 ): Float {
-    if (abs(t) < 1e-8f) return 1f  // No movement, fraction is irrelevant
-
+    if (abs(t) < 1e-8f) return 1f
     var maxFrac = 1f
-
-    // For each axis (x=0, y=1), find the fraction of t before hitting 0 or 1
     for (axis in 0..1) {
         val pos = if (axis == 0) corner.first else corner.second
         val vel = if (axis == 0) rail.first * t else rail.second * t
-
         if (vel > 0f) {
-            // Moving toward 1.0 boundary
             val room = 1f - pos
             if (room < vel) maxFrac = minOf(maxFrac, room / vel)
         } else if (vel < 0f) {
-            // Moving toward 0.0 boundary
-            val room = pos  // distance to 0
+            val room = pos
             if (room < -vel) maxFrac = minOf(maxFrac, room / (-vel))
         }
     }
-
     return maxFrac.coerceIn(0f, 1f)
 }
 
-/**
- * Test if a point is inside a convex quad using cross products.
- * Assumes corners are ordered: TL, TR, BR, BL (clockwise).
- */
 private fun pointInQuad(p: Offset, tl: Offset, tr: Offset, br: Offset, bl: Offset): Boolean {
     fun cross(o: Offset, a: Offset, b: Offset) =
         (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)

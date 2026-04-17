@@ -57,9 +57,10 @@ fun MyLensApp() {
         composable("edit/{pageId}") { backStackEntry ->
             val pageId = backStackEntry.arguments?.getString("pageId") ?: return@composable
             EditScreen(
-                pageId    = pageId,
-                onBack    = { navController.popBackStack() },
-                viewModel = scannerViewModel
+                pageId            = pageId,
+                onBack            = { navController.popBackStack() },
+                viewModel         = scannerViewModel,
+                settingsViewModel = settingsViewModel
             )
         }
 
