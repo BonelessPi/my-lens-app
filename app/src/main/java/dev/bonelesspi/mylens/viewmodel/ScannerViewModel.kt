@@ -10,13 +10,16 @@ import androidx.lifecycle.viewModelScope
 import dev.bonelesspi.mylens.data.CropRect
 import dev.bonelesspi.mylens.data.EditAction
 import dev.bonelesspi.mylens.data.ScanPage
+import dev.bonelesspi.mylens.data.SettingsRepository
 import dev.bonelesspi.mylens.ui.screens.PageSize
 import dev.bonelesspi.mylens.utils.CropUtils
 import dev.bonelesspi.mylens.utils.ImageUtils
 import dev.bonelesspi.mylens.utils.PdfBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.opencv.android.OpenCVLoader
@@ -30,16 +33,33 @@ sealed class ExportState {
     data class Error(val message: String) : ExportState()
 }
 
-/** Longest side in pixels for the preview bitmap shown in EditScreen. ~720p. */
-private const val PREVIEW_RESOLUTION = 1280
-
-/** Longest side in pixels for the thumbnail shown in SelectScreen. ~144p. */
-private const val THUMBNAIL_RESOLUTION = 144
-
-/** Longest side in pixels for export. Decoded fresh from URI at export time. */
-private const val EXPORT_RESOLUTION = 4096
-
 class ScannerViewModel(application: Application) : AndroidViewModel(application) {
+
+    // ── Settings ──────────────────────────────────────────────────────────────
+
+    private val settings = SettingsRepository(application)
+
+    // Expose as StateFlows so resolution values are always current.
+    // SharingStarted.Eagerly means the value is ready before any coroutine reads it.
+    val exportResolution: StateFlow<Int> = settings.exportResolution.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = SettingsRepository.DEFAULT_EXPORT_RESOLUTION
+    )
+
+    val previewResolution: StateFlow<Int> = settings.previewResolution.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = SettingsRepository.DEFAULT_PREVIEW_RESOLUTION
+    )
+
+    val thumbnailResolution: StateFlow<Int> = settings.thumbnailResolution.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = SettingsRepository.DEFAULT_THUMBNAIL_RESOLUTION
+    )
+
+    // ── Page list ─────────────────────────────────────────────────────────────
 
     val pages = mutableStateListOf<ScanPage>()
 
@@ -69,7 +89,6 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     /**
      * Read the source image dimensions without decoding pixel data.
      * Uses inJustDecodeBounds — fast and uses negligible memory.
-     * Updates the page's originalWidth/originalHeight fields in place.
      */
     private fun loadImageDimensions(id: String, uri: Uri) {
         viewModelScope.launch {
@@ -109,7 +128,6 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         _exportState.value = ExportState.Idle
     }
 
-    /** Recycle all bitmaps owned by a page. */
     private fun recyclePage(page: ScanPage) {
         page.baseBitmap?.recycle()
         page.previewBitmap?.recycle()
@@ -119,18 +137,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     // ── Bitmap helpers ────────────────────────────────────────────────────────
 
     private fun makeThumbnail(source: Bitmap): Bitmap {
-        val scale = THUMBNAIL_RESOLUTION.toFloat() / maxOf(source.width, source.height)
+        val maxDim = thumbnailResolution.value
+        val scale = maxDim.toFloat() / maxOf(source.width, source.height)
         val w = (source.width  * scale).toInt().coerceAtLeast(1)
         val h = (source.height * scale).toInt().coerceAtLeast(1)
         return source.scale(w, h)
     }
 
-    /**
-     * Apply [actions] in order to [base], returning the resulting bitmap.
-     * Each intermediate bitmap is recycled as we go to avoid accumulation.
-     * Used for undo (re-apply remainder of stack) and export (full-res re-apply).
-     * If actions is empty, returns a copy of [base].
-     */
     private suspend fun applyActions(base: Bitmap, actions: List<EditAction>): Bitmap =
         withContext(Dispatchers.Default) {
             if (actions.isEmpty()) return@withContext base.copy(base.config ?: Bitmap.Config.ARGB_8888, true)
@@ -139,10 +152,9 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 val next = when (action) {
                     is EditAction.Rotate -> ImageUtils.rotateBitmap(current, 90)
                     is EditAction.Warp   -> CropUtils.warpPerspective(
-                        current, action.crop, outputMaxDim = PREVIEW_RESOLUTION
+                        current, action.crop, outputMaxDim = previewResolution.value
                     )
                 }
-                // Recycle intermediate bitmaps but never recycle the original base
                 if (current !== base) current.recycle()
                 current = next
             }
@@ -151,25 +163,18 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     // ── EditScreen lifecycle ──────────────────────────────────────────────────
 
-    /**
-     * Ensure this page has a baseBitmap and previewBitmap ready for EditScreen.
-     * If baseBitmap is already present (page was opened before), only regenerates
-     * the previewBitmap if it is missing. No-op if both are already present.
-     */
     fun ensurePreview(id: String) {
         val index = pages.indexOfFirst { it.id == id }
         if (index == -1) return
         val page = pages[index]
 
-        // Both already ready — nothing to do
         if (page.baseBitmap != null && page.previewBitmap != null) return
 
         viewModelScope.launch {
-            val base =
-                page.baseBitmap
-                    ?: (withContext(Dispatchers.IO) {
-                        ImageUtils.decodeUri(getApplication(), page.uri, PREVIEW_RESOLUTION)
-                    } ?: return@launch)
+            val base = page.baseBitmap
+                ?: (withContext(Dispatchers.IO) {
+                    ImageUtils.decodeUri(getApplication(), page.uri, previewResolution.value)
+                } ?: return@launch)
 
             val preview = applyActions(base, page.actions)
             val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(preview) }
@@ -195,10 +200,6 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     // ── Edit operations ──────────────────────────────────────────────────────
 
-    /**
-     * Rotate 90° CW: append action, update previewBitmap in-place from current preview.
-     * Fast path — no re-apply from base needed.
-     */
     fun applyRotate(id: String) {
         val index = pages.indexOfFirst { it.id == id }
         if (index == -1) return
@@ -226,10 +227,6 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /**
-     * Warp: append action, update previewBitmap in-place from current preview.
-     * Fast path — no re-apply from base needed.
-     */
     fun applyWarp(id: String, crop: CropRect) {
         val index = pages.indexOfFirst { it.id == id }
         if (index == -1) return
@@ -237,7 +234,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             val warped = CropUtils.warpPerspective(
-                current, crop, outputMaxDim = PREVIEW_RESOLUTION
+                current, crop, outputMaxDim = previewResolution.value
             )
             val thumbnail = withContext(Dispatchers.Default) { makeThumbnail(warped) }
 
@@ -257,11 +254,6 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /**
-     * Undo the last action: pop from the action list, re-apply the remainder
-     * to baseBitmap to produce the new previewBitmap.
-     * No-op if the action list is empty.
-     */
     fun undoLastAction(id: String) {
         val index = pages.indexOfFirst { it.id == id }
         if (index == -1) return
@@ -291,16 +283,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /**
-     * Reset a page: clear all actions, re-decode base from URI, regenerate preview.
-     */
     fun resetPage(id: String) {
         val index = pages.indexOfFirst { it.id == id }
         if (index == -1) return
 
         viewModelScope.launch {
             val newBase = withContext(Dispatchers.IO) {
-                ImageUtils.decodeUri(getApplication(), pages[index].uri, PREVIEW_RESOLUTION)
+                ImageUtils.decodeUri(getApplication(), pages[index].uri, previewResolution.value)
             } ?: return@launch
 
             val newPreview = withContext(Dispatchers.Default) {
@@ -331,7 +320,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         outputDir: File,
         fileName: String = "scan.pdf",
         pageSize: PageSize = PageSize.A4,
-        quality: Int = 90
+        quality: Int = SettingsRepository.DEFAULT_JPEG_QUALITY
     ) {
         viewModelScope.launch {
             _exportState.value = ExportState.Building
@@ -343,7 +332,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     fileName         = fileName,
                     pageSize         = pageSize,
                     quality          = quality,
-                    exportResolution = EXPORT_RESOLUTION
+                    exportResolution = exportResolution.value
                 )
                 _exportState.value = ExportState.Done(file)
             } catch (e: Exception) {

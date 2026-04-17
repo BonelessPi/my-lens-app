@@ -53,8 +53,6 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    // material-icons-extended kept for icons that exist in it (Delete, Add, etc.)
-    // For RotateRight (which doesn't exist), we use Rotate90DegreesCw which does.
     implementation("androidx.compose.material:material-icons-extended")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
@@ -66,6 +64,9 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.navigation:navigation-compose:2.8.2")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
+
+    // Jetpack DataStore — persistent key-value settings
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     // CameraX
     val cameraxVersion = "1.3.4"
@@ -82,8 +83,7 @@ dependencies {
     // Reorderable drag-and-drop list
     implementation("sh.calvin.reorderable:reorderable:2.1.1")
 
-    // OpenCV via Maven Central — no manual SDK download required!
-    // Available since 4.9.0. Includes native .so for all ABIs.
+    // OpenCV via Maven Central
     implementation("org.opencv:opencv:4.10.0")
 
     // iText7 — PDF generation

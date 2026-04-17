@@ -12,8 +12,10 @@ import androidx.navigation.compose.rememberNavController
 import dev.bonelesspi.mylens.ui.screens.CameraScreen
 import dev.bonelesspi.mylens.ui.screens.EditScreen
 import dev.bonelesspi.mylens.ui.screens.SelectScreen
+import dev.bonelesspi.mylens.ui.screens.SettingsScreen
 import dev.bonelesspi.mylens.ui.theme.MyLensTheme
 import dev.bonelesspi.mylens.viewmodel.ScannerViewModel
+import dev.bonelesspi.mylens.viewmodel.SettingsViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -30,7 +32,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MyLensApp() {
     val navController = rememberNavController()
-    val viewModel: ScannerViewModel = viewModel()
+    val scannerViewModel: ScannerViewModel = viewModel()
+    val settingsViewModel: SettingsViewModel = viewModel()
 
     NavHost(navController = navController, startDestination = "select") {
 
@@ -38,15 +41,16 @@ fun MyLensApp() {
             SelectScreen(
                 onNavigateToCamera   = { navController.navigate("camera") },
                 onNavigateToEdit     = { pageId -> navController.navigate("edit/$pageId") },
-                onNavigateToSettings = { /* TODO: navController.navigate("settings") */ },
-                viewModel            = viewModel
+                onNavigateToSettings = { navController.navigate("settings") },
+                viewModel            = scannerViewModel,
+                settingsViewModel    = settingsViewModel
             )
         }
 
         composable("camera") {
             CameraScreen(
                 onBack    = { navController.popBackStack() },
-                viewModel = viewModel
+                viewModel = scannerViewModel
             )
         }
 
@@ -55,7 +59,14 @@ fun MyLensApp() {
             EditScreen(
                 pageId    = pageId,
                 onBack    = { navController.popBackStack() },
-                viewModel = viewModel
+                viewModel = scannerViewModel
+            )
+        }
+
+        composable("settings") {
+            SettingsScreen(
+                onBack    = { navController.popBackStack() },
+                viewModel = settingsViewModel
             )
         }
     }

@@ -43,11 +43,17 @@ fun SelectScreen(
     onNavigateToCamera: () -> Unit,
     onNavigateToEdit: (pageId: String) -> Unit,
     onNavigateToSettings: () -> Unit,
-    viewModel: ScannerViewModel = viewModel()
+    viewModel: ScannerViewModel = viewModel(),
+    settingsViewModel: dev.bonelesspi.mylens.viewmodel.SettingsViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val exportState by viewModel.exportState.collectAsStateWithLifecycle()
+
+    // ── Settings-derived defaults ─────────────────────────────────────────────
+    val settingsJpegQuality    by settingsViewModel.jpegQuality.collectAsStateWithLifecycle()
+    val settingsDefaultPageSize by settingsViewModel.defaultPageSize.collectAsStateWithLifecycle()
+    val settingsOutputFolderUri by settingsViewModel.outputFolderUri.collectAsStateWithLifecycle()
 
     // ── Photo picker ──────────────────────────────────────────────────────────
     val photoPicker = rememberLauncherForActivityResult(
@@ -55,7 +61,10 @@ fun SelectScreen(
     ) { uris -> if (uris.isNotEmpty()) viewModel.addPages(uris) }
 
     // ── Folder picker (SAF) ───────────────────────────────────────────────────
-    var outputFolderUri by remember { mutableStateOf<Uri?>(null) }
+    // Seed from persisted setting; user can override for this session via the sheet.
+    var outputFolderUri by remember(settingsOutputFolderUri) {
+        mutableStateOf(settingsOutputFolderUri.takeIf { it.isNotEmpty() }?.let { Uri.parse(it) })
+    }
     val outputFolderLabel by remember(outputFolderUri) {
         derivedStateOf {
             outputFolderUri?.lastPathSegment?.substringAfterLast(':') ?: "Documents"
@@ -71,6 +80,8 @@ fun SelectScreen(
                         android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
             outputFolderUri = uri
+            // Persist the new folder as the new default
+            settingsViewModel.setOutputFolderUri(uri.toString())
         }
     }
 
@@ -88,10 +99,14 @@ fun SelectScreen(
         )
     )
 
-    // ── Export settings state ─────────────────────────────────────────────────
+    // ── Export settings state — seeded from persisted settings ────────────────
     var fileName by remember { mutableStateOf("scan") }
-    var selectedPageSize by remember { mutableStateOf(PageSize.A4) }
-    var jpegQuality by remember { mutableFloatStateOf(90f) }
+    var selectedPageSize by remember(settingsDefaultPageSize) {
+        mutableStateOf(PageSize.entries.firstOrNull { it.name == settingsDefaultPageSize } ?: PageSize.A4)
+    }
+    var jpegQuality by remember(settingsJpegQuality) {
+        mutableFloatStateOf(settingsJpegQuality.toFloat())
+    }
 
     // ── Clear all dialog ──────────────────────────────────────────────────────
     var showClearConfirm by remember { mutableStateOf(false) }

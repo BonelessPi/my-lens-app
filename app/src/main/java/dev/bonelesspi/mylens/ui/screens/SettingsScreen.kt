@@ -1,0 +1,259 @@
+package dev.bonelesspi.mylens.ui.screens
+
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.bonelesspi.mylens.viewmodel.SettingsViewModel
+
+// ── Named resolution presets ──────────────────────────────────────────────────
+
+private data class ResolutionOption(val label: String, val pixels: Int)
+
+private val EXPORT_RESOLUTION_OPTIONS = listOf(
+    ResolutionOption("Low (1024 px)",     1024),
+    ResolutionOption("Medium (2048 px)",  2048),
+    ResolutionOption("High (3072 px)",    3072),
+    ResolutionOption("Maximum (4096 px)", 4096)
+)
+
+private val PREVIEW_RESOLUTION_OPTIONS = listOf(
+    ResolutionOption("Low (720 px)",    720),
+    ResolutionOption("Medium (1280 px)", 1280),
+    ResolutionOption("High (1920 px)",  1920)
+)
+
+private val THUMBNAIL_RESOLUTION_OPTIONS = listOf(
+    ResolutionOption("Small (96 px)",   96),
+    ResolutionOption("Medium (144 px)", 144),
+    ResolutionOption("Large (192 px)",  192)
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(
+    onBack: () -> Unit,
+    viewModel: SettingsViewModel = viewModel()
+) {
+    val context = LocalContext.current
+
+    val exportResolution    by viewModel.exportResolution.collectAsStateWithLifecycle()
+    val previewResolution   by viewModel.previewResolution.collectAsStateWithLifecycle()
+    val thumbnailResolution by viewModel.thumbnailResolution.collectAsStateWithLifecycle()
+    val jpegQuality         by viewModel.jpegQuality.collectAsStateWithLifecycle()
+    val defaultPageSize     by viewModel.defaultPageSize.collectAsStateWithLifecycle()
+    val outputFolderUri     by viewModel.outputFolderUri.collectAsStateWithLifecycle()
+
+    val outputFolderLabel = outputFolderUri
+        .takeIf { it.isNotEmpty() }
+        ?.let { Uri.parse(it).lastPathSegment?.substringAfterLast(':') }
+        ?: "Documents"
+
+    // ── Folder picker ─────────────────────────────────────────────────────────
+    val folderPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            viewModel.setOutputFolderUri(uri.toString())
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(28.dp)
+        ) {
+            Spacer(Modifier.height(4.dp))
+
+            // ── Export resolution ─────────────────────────────────────────────
+            DropdownSetting(
+                label = "Export resolution",
+                options = EXPORT_RESOLUTION_OPTIONS,
+                selectedPixels = exportResolution,
+                onSelect = { viewModel.setExportResolution(it) }
+            )
+
+            // ── Preview resolution ────────────────────────────────────────────
+            DropdownSetting(
+                label = "Preview resolution",
+                options = PREVIEW_RESOLUTION_OPTIONS,
+                selectedPixels = previewResolution,
+                onSelect = { viewModel.setPreviewResolution(it) }
+            )
+
+            // ── Thumbnail resolution ──────────────────────────────────────────
+            DropdownSetting(
+                label = "Thumbnail resolution",
+                options = THUMBNAIL_RESOLUTION_OPTIONS,
+                selectedPixels = thumbnailResolution,
+                onSelect = { viewModel.setThumbnailResolution(it) }
+            )
+
+            // ── JPEG quality ──────────────────────────────────────────────────
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Default JPEG quality", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "$jpegQuality%",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Slider(
+                    value = jpegQuality.toFloat(),
+                    onValueChange = { viewModel.setJpegQuality(it.toInt()) },
+                    valueRange = 50f..100f,
+                    steps = 9,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Smaller file", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outlineVariant)
+                    Text("Best quality", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outlineVariant)
+                }
+            }
+
+            // ── Default page size ─────────────────────────────────────────────
+            DropdownSettingRaw(
+                label = "Default page size",
+                options = PageSize.entries.map { it.name to it.label },
+                selectedKey = defaultPageSize,
+                onSelect = { viewModel.setDefaultPageSize(it) }
+            )
+
+            // ── Default output folder ─────────────────────────────────────────
+            OutlinedTextField(
+                value = outputFolderLabel,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Default save folder") },
+                trailingIcon = {
+                    IconButton(onClick = {
+                        folderPicker.launch(
+                            Uri.parse(
+                                outputFolderUri.takeIf { it.isNotEmpty() }
+                                    ?: "content://com.android.externalstorage.documents/tree/primary:Documents"
+                            )
+                        )
+                    }) {
+                        Icon(Icons.Default.Folder, "Choose folder")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+// ── Reusable dropdown for resolution options ──────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DropdownSetting(
+    label: String,
+    options: List<ResolutionOption>,
+    selectedPixels: Int,
+    onSelect: (Int) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel = options.firstOrNull { it.pixels == selectedPixels }?.label
+        ?: "$selectedPixels px"
+
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = selectedLabel,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(MenuAnchorType.PrimaryEditable, true)
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.label) },
+                    onClick = { onSelect(option.pixels); expanded = false }
+                )
+            }
+        }
+    }
+}
+
+// ── Reusable dropdown for string-keyed options (e.g. PageSize) ───────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DropdownSettingRaw(
+    label: String,
+    options: List<Pair<String, String>>,   // key to display label
+    selectedKey: String,
+    onSelect: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel = options.firstOrNull { it.first == selectedKey }?.second ?: selectedKey
+
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = selectedLabel,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(MenuAnchorType.PrimaryEditable, true)
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { (key, displayLabel) ->
+                DropdownMenuItem(
+                    text = { Text(displayLabel) },
+                    onClick = { onSelect(key); expanded = false }
+                )
+            }
+        }
+    }
+}
