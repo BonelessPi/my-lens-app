@@ -75,7 +75,7 @@ private fun FlashMode.label() = when (this) {
 
 // ── Focus ring state ──────────────────────────────────────────────────────────
 
-private data class FocusRing(val position: Offset, val progress: Float)  // progress 0→1 = ring fading
+private data class FocusRing(val position: Offset, val progress: Float)
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -92,14 +92,17 @@ fun CameraScreen(
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var camera by remember { mutableStateOf<Camera?>(null) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
-    var isCaptureInProgress by remember { mutableStateOf(false) }
+
+    // captureFired is a plain mutableStateOf so Compose reads it for the button
+    // enabled state, but crucially we also check it synchronously inside onClick
+    // before any async work — preventing a second tap from racing through.
+    var captureFired by remember { mutableStateOf(false) }
 
     // ── Controls state ───────────────────────────────────────────────────────
     var flashMode by remember { mutableStateOf(FlashMode.OFF) }
     var zoomRatio by remember { mutableFloatStateOf(1f) }
     var minZoom by remember { mutableFloatStateOf(1f) }
     var maxZoom by remember { mutableFloatStateOf(1f) }
-    // Exposure index: typically -2..+2 EV steps, camera reports actual range
     var exposureIndex by remember { mutableIntStateOf(0) }
     var exposureRange by remember { mutableStateOf(0..0) }
     var showExposureSlider by remember { mutableStateOf(false) }
@@ -116,22 +119,18 @@ fun CameraScreen(
         if (!cameraPermission.status.isGranted) cameraPermission.launchPermissionRequest()
     }
 
-    // Sync flash mode to ImageCapture whenever it changes
     LaunchedEffect(flashMode, imageCapture) {
         imageCapture?.flashMode = flashMode.toImageCaptureFlashMode()
     }
 
-    // Sync zoom ratio to camera whenever it changes
     LaunchedEffect(zoomRatio, camera) {
         camera?.cameraControl?.setZoomRatio(zoomRatio)
     }
 
-    // Sync exposure index to camera whenever it changes
     LaunchedEffect(exposureIndex, camera) {
         camera?.cameraControl?.setExposureCompensationIndex(exposureIndex)
     }
 
-    // Auto-hide exposure slider after 3 s of inactivity
     LaunchedEffect(showExposureSlider, exposureIndex) {
         if (showExposureSlider) {
             delay(3000)
@@ -149,7 +148,6 @@ fun CameraScreen(
                     }
                 },
                 actions = {
-                    // Flash toggle
                     IconButton(onClick = {
                         flashMode = flashMode.next()
                         imageCapture?.flashMode = flashMode.toImageCaptureFlashMode()
@@ -193,7 +191,6 @@ fun CameraScreen(
                                 )
                                 camera = cam
 
-                                // Grab zoom and exposure ranges from camera info
                                 val zoomState = cam.cameraInfo.zoomState.value
                                 minZoom = zoomState?.minZoomRatio ?: 1f
                                 maxZoom = zoomState?.maxZoomRatio ?: 8f
@@ -214,7 +211,6 @@ fun CameraScreen(
                     // Observe live zoom changes from the camera (e.g. after pinch)
                     update = { _ ->
                         camera?.cameraInfo?.zoomState?.value?.let { state ->
-                            // Clamp to avoid feedback loop with LaunchedEffect
                             if (kotlin.math.abs(state.zoomRatio - zoomRatio) > 0.01f) {
                                 zoomRatio = state.zoomRatio.coerceIn(minZoom, maxZoom)
                             }
@@ -247,7 +243,6 @@ fun CameraScreen(
                                     .build()
                                 camera?.cameraControl?.startFocusAndMetering(action)
 
-                                // Show focus ring animation
                                 scope.launch {
                                     focusRing = FocusRing(tapOffset, 0f)
                                     delay(800)
@@ -272,7 +267,7 @@ fun CameraScreen(
                     }
                 }
 
-                // ── Zoom ratio badge (appears during pinch) ──────────────────
+                // ── Zoom badge ───────────────────────────────────────────────
                 if (zoomRatio > minZoom + 0.05f) {
                     Box(
                         modifier = Modifier
@@ -282,15 +277,11 @@ fun CameraScreen(
                             .background(Color.Black.copy(alpha = 0.5f))
                             .padding(horizontal = 14.dp, vertical = 6.dp)
                     ) {
-                        Text(
-                            text = "%.1fx".format(zoomRatio),
-                            color = Color.White,
-                            fontSize = 14.sp
-                        )
+                        Text("%.1fx".format(zoomRatio), color = Color.White, fontSize = 14.sp)
                     }
                 }
 
-                // ── Right-side controls: exposure ────────────────────────────
+                // ── Exposure controls ────────────────────────────────────────
                 Column(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
@@ -298,7 +289,6 @@ fun CameraScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Exposure button — toggles slider
                     if (exposureRange.last > exposureRange.first) {
                         IconButton(
                             onClick = { showExposureSlider = !showExposureSlider },
@@ -307,19 +297,13 @@ fun CameraScreen(
                                 .background(Color.Black.copy(alpha = 0.45f))
                                 .size(44.dp)
                         ) {
-                            // Show live EV value, coloured yellow when slider is open
-                            val evLabel = when {
-                                exposureIndex > 0 -> "+$exposureIndex"
-                                else -> "$exposureIndex"
-                            }
                             Text(
-                                text = evLabel,
+                                text = if (exposureIndex > 0) "+$exposureIndex" else "$exposureIndex",
                                 color = if (showExposureSlider) Color.Yellow else Color.White,
                                 fontSize = 13.sp
                             )
                         }
 
-                        // Vertical exposure slider — shown/hidden
                         AnimatedVisibility(
                             visible = showExposureSlider,
                             enter = fadeIn() + slideInHorizontally { it },
@@ -342,7 +326,7 @@ fun CameraScreen(
                                     value = exposureIndex.toFloat(),
                                     onValueChange = { v ->
                                         exposureIndex = v.toInt()
-                                        showExposureSlider = true   // reset auto-hide timer
+                                        showExposureSlider = true
                                     },
                                     valueRange = exposureRange.first.toFloat()..exposureRange.last.toFloat(),
                                     modifier = Modifier.height(160.dp)
@@ -352,7 +336,7 @@ fun CameraScreen(
                     }
                 }
 
-                // ── Zoom slider at bottom ────────────────────────────────────
+                // ── Zoom slider ──────────────────────────────────────────────
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -379,18 +363,28 @@ fun CameraScreen(
                     }
                 }
 
-                // ── Shutter button ───────────────────────────────────────────
+                // ── Shutter button ────────────────────────────────────────────
+                // captureFired gates both the onClick logic and the visual state.
+                // It is set synchronously as the very first line of onClick, before
+                // any async work, so a rapid second tap sees it as true immediately.
+                // The callback from takePicture runs on the main executor, so
+                // addPage + onBack happen sequentially with no coroutine needed.
                 FloatingActionButton(
                     onClick = {
-                        if (!isCaptureInProgress) {
-                            isCaptureInProgress = true
-                            capturePhoto(context, imageCapture) { uri ->
-                                uri?.let { viewModel.addPage(it) }
-                                isCaptureInProgress = false
-                                onBack()
-                            }
+                        if (captureFired) return@FloatingActionButton
+                        val capture = imageCapture ?: return@FloatingActionButton
+                        captureFired = true  // synchronous gate — must be first
+
+                        capturePhoto(context, capture) { uri ->
+                            // onImageSaved / onError both deliver here on the main thread.
+                            if (uri != null) viewModel.addPage(uri)
+                            onBack()
                         }
                     },
+                    containerColor = if (captureFired)
+                        MaterialTheme.colorScheme.surfaceVariant
+                    else
+                        MaterialTheme.colorScheme.primaryContainer,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 32.dp)
@@ -424,7 +418,7 @@ fun CameraScreen(
     }
 }
 
-// ── Vertical slider (wraps horizontal Slider with rotation) ──────────────────
+// ── Vertical slider ──────────────────────────────────────────────────────────
 
 @Composable
 private fun VerticalSlider(
@@ -433,18 +427,12 @@ private fun VerticalSlider(
     valueRange: ClosedFloatingPointRange<Float>,
     modifier: Modifier = Modifier
 ) {
-    // Compose doesn't have a built-in vertical slider; rotate a horizontal one
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center
-    ) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Slider(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
-            modifier = Modifier
-                .width(160.dp)     // becomes the height after rotation
-                .rotate(-90f),
+            modifier = Modifier.width(160.dp).rotate(-90f),
             colors = SliderDefaults.colors(
                 thumbColor = Color.Yellow,
                 activeTrackColor = Color.Yellow,
@@ -454,21 +442,18 @@ private fun VerticalSlider(
     }
 }
 
-// ── Photo capture (unchanged) ────────────────────────────────────────────────
+// ── Photo capture ─────────────────────────────────────────────────────────────
+// onResult is called exactly once on the main thread.
 
 private fun capturePhoto(
     context: Context,
-    imageCapture: ImageCapture?,
+    imageCapture: ImageCapture,
     onResult: (Uri?) -> Unit
 ) {
-    imageCapture ?: run { onResult(null); return }
-
     val contentValues = ContentValues().apply {
         put(MediaStore.MediaColumns.DISPLAY_NAME, "scan_${System.currentTimeMillis()}")
         put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MyLens")
-        }
+        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MyLens")
     }
 
     val outputOptions = ImageCapture.OutputFileOptions.Builder(
@@ -482,7 +467,9 @@ private fun capturePhoto(
         ContextCompat.getMainExecutor(context),
         object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                onResult(output.savedUri)
+                val uri = output.savedUri
+                    ?: queryLatestMediaStoreImage(context)
+                onResult(uri)
             }
             override fun onError(exception: ImageCaptureException) {
                 exception.printStackTrace()
@@ -490,4 +477,28 @@ private fun capturePhoto(
             }
         }
     )
+}
+
+/**
+ * Fallback for devices where [ImageCapture.OutputFileResults.savedUri] is null.
+ */
+private fun queryLatestMediaStoreImage(context: Context): Uri? {
+    return try {
+        val projection = arrayOf(MediaStore.Images.Media._ID)
+        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+        context.contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            projection, null, null, sortOrder
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID))
+                android.content.ContentUris.withAppendedId(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id
+                )
+            } else null
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
 }

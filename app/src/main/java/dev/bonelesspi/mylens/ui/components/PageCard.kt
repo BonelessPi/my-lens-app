@@ -21,12 +21,7 @@ import coil.compose.AsyncImage
 import dev.bonelesspi.mylens.data.ScanPage
 import sh.calvin.reorderable.ReorderableCollectionItemScope
 
-// Thumbnail aspect ratio is clamped to this range to prevent extremely
-// tall or wide cards when the source image has an unusual aspect ratio.
-private const val MIN_ASPECT = 3f / 4f  // tallest allowed (portrait)
-private const val MAX_ASPECT = 4f / 3f  // widest allowed (landscape)
-
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun ReorderableCollectionItemScope.PageCard(
     page: ScanPage,
@@ -36,13 +31,11 @@ fun ReorderableCollectionItemScope.PageCard(
     isDragging: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    // Determine thumbnail aspect ratio from the source image dimensions,
-    // falling back to 3:4 (portrait document) if not yet loaded.
-    val thumbnailAspect = if (page.originalWidth > 0 && page.originalHeight > 0) {
-        (page.originalWidth.toFloat() / page.originalHeight.toFloat())
-            .coerceIn(MIN_ASPECT, MAX_ASPECT)
-    } else {
-        MIN_ASPECT  // default portrait until dimensions are available
+    // Prefer the edited preview bitmap dimensions (reflects crops/rotations), then to a portrait default.
+    val (displayWidth, displayHeight) = when {
+        page.previewBitmap != null ->
+            Pair(page.previewBitmap.width, page.previewBitmap.height)
+        else -> Pair(0, 0)
     }
 
     Card(
@@ -64,7 +57,8 @@ fun ReorderableCollectionItemScope.PageCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // ── Drag handle + page number ─────────────────────────────────────
+            // ── Page number + drag handle ─────────────────────────────────────
+            // Number on top, handle below — both centered in a fixed-width column.
             Column(
                 modifier = Modifier
                     .width(36.dp)
@@ -72,30 +66,25 @@ fun ReorderableCollectionItemScope.PageCard(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Text(
+                    text = "$pageNumber",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(2.dp))
                 Icon(
                     imageVector = Icons.Default.DragHandle,
                     contentDescription = "Drag to reorder",
                     tint = MaterialTheme.colorScheme.outlineVariant,
                     modifier = Modifier.size(20.dp)
                 )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "$pageNumber",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
             }
 
             // ── Thumbnail ─────────────────────────────────────────────────────
-            // Height is fixed; width derives from the aspect ratio so the
-            // thumbnail always shows the full image without cropping.
-            val thumbHeight = 100.dp
-            val thumbWidth = thumbHeight * thumbnailAspect
-
             Box(
                 modifier = Modifier
-                    .width(thumbWidth)
-                    .height(thumbHeight)
+                    .width(100.dp)
+                    .height(100.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
@@ -106,14 +95,14 @@ fun ReorderableCollectionItemScope.PageCard(
                     Image(
                         bitmap = imageBitmap,
                         contentDescription = "Page $pageNumber thumbnail",
-                        contentScale = ContentScale.Crop,
+                        contentScale = ContentScale.Fit,  // Fit, not Crop — preserves full image
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
                     AsyncImage(
                         model = page.uri,
                         contentDescription = "Page $pageNumber thumbnail",
-                        contentScale = ContentScale.Crop,
+                        contentScale = ContentScale.Fit,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -122,33 +111,76 @@ fun ReorderableCollectionItemScope.PageCard(
             // ── Metadata ──────────────────────────────────────────────────────
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                // Original dimensions — shown once loaded
-                if (page.originalWidth > 0 && page.originalHeight > 0) {
+                // Dimensions — show post-edit size when available (from previewBitmap),
+                // Hidden until at least one dimension is known.
+                if (displayWidth > 0 && displayHeight > 0) {
+                    val dimLabel = if (page.previewBitmap != null && page.actions.isNotEmpty())
+                        "$displayWidth × $displayHeight (edited)"
+                    else
+                        "$displayWidth × $displayHeight"
                     Text(
-                        text = "${page.originalWidth} × ${page.originalHeight}",
+                        text = dimLabel,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
-                // Edited chip — only shown when at least one action has been applied
-                if (page.actions.isNotEmpty()) {
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier.wrapContentSize()
-                    ) {
-                        Text(
-                            text = "Edited",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                // Chip row — only chips that are relevant are shown
+                FlowRow(
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // Number of edits applied
+                    if (page.actions.isNotEmpty()) {
+                        val editLabel = if (page.actions.size == 1) "1 edit" else "${page.actions.size} edits"
+                        PageChip(
+                            text = editLabel,
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+
+                    // Per-page export resolution override
+                    if (page.exportResolution != null) {
+                        PageChip(
+                            text = "${page.exportResolution}px",
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+
+                    // Per-page JPEG quality override
+                    if (page.jpegQuality != null) {
+                        PageChip(
+                            text = "Q${page.jpegQuality}%",
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                         )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PageChip(
+    text: String,
+    containerColor: androidx.compose.ui.graphics.Color,
+    contentColor: androidx.compose.ui.graphics.Color
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = containerColor,
+        modifier = Modifier.wrapContentSize()
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = contentColor,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+        )
     }
 }

@@ -2,7 +2,6 @@ package dev.bonelesspi.mylens.viewmodel
 
 import android.app.Application
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.AndroidViewModel
@@ -73,41 +72,11 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     // ── Page list management ─────────────────────────────────────────────────
 
     fun addPages(uris: List<Uri>) {
-        uris.forEach { uri ->
-            val page = ScanPage(uri = uri)
-            pages.add(page)
-            loadImageDimensions(page.id, uri)
-        }
+        uris.forEach { addPage(it) }
     }
 
     fun addPage(uri: Uri) {
-        val page = ScanPage(uri = uri)
-        pages.add(page)
-        loadImageDimensions(page.id, uri)
-    }
-
-    /**
-     * Read the source image dimensions without decoding pixel data.
-     * Uses inJustDecodeBounds — fast and uses negligible memory.
-     */
-    private fun loadImageDimensions(id: String, uri: Uri) {
-        viewModelScope.launch {
-            val (w, h) = withContext(Dispatchers.IO) {
-                val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                try {
-                    getApplication<Application>().contentResolver.openInputStream(uri)?.use {
-                        BitmapFactory.decodeStream(it, null, opts)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-                Pair(opts.outWidth.coerceAtLeast(0), opts.outHeight.coerceAtLeast(0))
-            }
-            val i = pages.indexOfFirst { it.id == id }
-            if (i != -1) {
-                pages[i] = pages[i].copy(originalWidth = w, originalHeight = h)
-            }
-        }
+        pages.add(ScanPage(uri = uri))
     }
 
     fun removePage(id: String) {

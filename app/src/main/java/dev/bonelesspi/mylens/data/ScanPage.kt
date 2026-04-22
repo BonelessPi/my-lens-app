@@ -13,9 +13,6 @@ import java.util.UUID
  *                            truth for the page's edit state. Applied in order to produce both
  *                            the preview bitmap (at preview resolution) and the export bitmap
  *                            (at full resolution decoded fresh from [uri]).
- * @param originalWidth       Width of the source image in pixels, read via inJustDecodeBounds
- *                            immediately after the page is added. 0 until populated.
- * @param originalHeight      Height of the source image in pixels. 0 until populated.
  * @param exportResolution    Per-page export resolution override (longest side in pixels).
  *                            Null means inherit the global default from settings.
  * @param jpegQuality         Per-page JPEG quality override (50–100).
@@ -33,8 +30,6 @@ data class ScanPage(
     val id: String = UUID.randomUUID().toString(),
     val uri: Uri,
     val actions: List<EditAction> = emptyList(),
-    val originalWidth: Int = 0,
-    val originalHeight: Int = 0,
     val exportResolution: Int? = null,
     val jpegQuality: Int? = null,
     val baseBitmap: Bitmap? = null,
