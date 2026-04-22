@@ -161,7 +161,7 @@ fun EditScreen(
             val d = dist(touch, normToCanvas(nx, ny))
             if (d < bestCornerDist) { bestCornerDist = d; bestCorner = i }
         }
-        if (bestCorner != null) return DragTarget.Corner(bestCorner!!)
+        if (bestCorner != null) return DragTarget.Corner(bestCorner)
 
         var bestSide: Int? = null
         var bestSideDist = sideHitPx
@@ -169,7 +169,7 @@ fun EditScreen(
             val d = dist(touch, sideMidpoint(crop, i))
             if (d < bestSideDist) { bestSideDist = d; bestSide = i }
         }
-        if (bestSide != null) return DragTarget.Side(bestSide!!)
+        if (bestSide != null) return DragTarget.Side(bestSide)
 
         val tl = normToCanvas(crop.topLeft.first,     crop.topLeft.second)
         val tr = normToCanvas(crop.topRight.first,    crop.topRight.second)
@@ -705,7 +705,7 @@ private fun ResolutionDropdown(
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded && enabled) },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor(MenuAnchorType.PrimaryEditable, true)
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
         )
         ExposedDropdownMenu(
             expanded = expanded && enabled,

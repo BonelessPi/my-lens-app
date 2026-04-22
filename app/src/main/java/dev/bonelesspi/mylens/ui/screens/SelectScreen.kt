@@ -361,7 +361,7 @@ private fun ExportSheetContent(
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(pageSizeMenuExpanded) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .menuAnchor(MenuAnchorType.PrimaryEditable, true)
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
             )
             ExposedDropdownMenu(
                 expanded = pageSizeMenuExpanded,

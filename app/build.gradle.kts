@@ -4,15 +4,15 @@ plugins {
 }
 
 android {
-    namespace = "dev.bonelesspi.mylens"
+    namespace  = "dev.bonelesspi.mylens"
     compileSdk = 36
 
     defaultConfig {
         applicationId = "dev.bonelesspi.mylens"
-        minSdk = 33
-        targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        minSdk        = 33
+        targetSdk     = 36
+        versionCode   = 1
+        versionName   = "1.0"
     }
 
     buildTypes {
@@ -36,6 +36,10 @@ android {
             excludes += "META-INF/NOTICE"
             excludes += "META-INF/LICENSE"
             excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/*.md"
+        }
+        jniLibs {
+            useLegacyPackaging = false
         }
     }
 }
@@ -47,47 +51,29 @@ kotlin {
 }
 
 dependencies {
-    // Compose BOM
-    val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
+    // Compose
+    val composeBom = platform(libs.compose.bom)
     implementation(composeBom)
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
-    debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation(libs.bundles.compose)
+    debugImplementation(libs.compose.ui.tooling)
 
-    // Core AndroidX
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
-    implementation("androidx.activity:activity-compose:1.9.2")
-    implementation("androidx.navigation:navigation-compose:2.8.2")
-    implementation("androidx.exifinterface:exifinterface:1.3.7")
-
-    // Jetpack DataStore — persistent key-value settings
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    // AndroidX
+    implementation(libs.core.ktx)
+    implementation(libs.bundles.lifecycle)
+    implementation(libs.activity.compose)
+    implementation(libs.navigation.compose)
+    implementation(libs.exifinterface)
+    implementation(libs.datastore.preferences)
 
     // CameraX
-    val cameraxVersion = "1.3.4"
-    implementation("androidx.camera:camera-camera2:$cameraxVersion")
-    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
-    implementation("androidx.camera:camera-view:$cameraxVersion")
+    implementation(libs.bundles.camerax)
 
-    // Accompanist permissions
-    implementation("com.google.accompanist:accompanist-permissions:0.36.0")
-
-    // Coil — image loading in Compose
-    implementation("io.coil-kt:coil-compose:2.7.0")
-
-    // Reorderable drag-and-drop list
-    implementation("sh.calvin.reorderable:reorderable:2.1.1")
-
-    // OpenCV via Maven Central
-    implementation("org.opencv:opencv:4.10.0")
-
-    // iText7 — PDF generation
-    implementation("com.itextpdf:itext7-core:7.2.5") {
+    // Third-party
+    implementation(libs.accompanist.permissions)
+    implementation(libs.coil.compose)
+    implementation(libs.reorderable)
+    implementation(libs.opencv)
+    implementation(libs.itext7.core) {
         exclude(group = "org.bouncycastle")
         exclude(group = "com.itextpdf", module = "bouncy-castle-adapter")
         exclude(group = "com.itextpdf", module = "bouncy-castle-fips-adapter")
