@@ -56,7 +56,7 @@ object PdfBuilder {
 
             var bitmap = ImageUtils.decodeUri(
                 context, page.uri, maxDimension = effectiveResolution
-            ) ?: return@forEach
+            ) ?: page.baseBitmap ?: return@forEach
 
             for (action in page.actions) {
                 val next = when (action) {

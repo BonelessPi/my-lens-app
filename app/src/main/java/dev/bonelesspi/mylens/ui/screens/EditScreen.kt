@@ -431,24 +431,6 @@ fun EditScreen(
                             color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
-
-                HorizontalDivider()
-
-                // ── Reset both overrides ──────────────────────────────────────
-                OutlinedButton(
-                    onClick = {
-                        resolutionOverrideEnabled = false
-                        qualityOverrideEnabled = false
-                        resolutionSelectorValue = globalExportResolution
-                        qualitySelectorValue = globalJpegQuality
-                        viewModel.setPageExportResolution(pageId, null)
-                        viewModel.setPageJpegQuality(pageId, null)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = resolutionOverrideEnabled || qualityOverrideEnabled
-                ) {
-                    Text("Reset to defaults")
-                }
             }
         }
     }

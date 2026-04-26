@@ -17,13 +17,13 @@ import java.util.UUID
  *                            Null means inherit the global default from settings.
  * @param jpegQuality         Per-page JPEG quality override (50–100).
  *                            Null means inherit the global default from settings.
- * @param baseBitmap          The source URI decoded at preview resolution (~720p) with NO actions
+ * @param baseBitmap          The source URI decoded at preview resolution with NO actions
  *                            applied. Cached to avoid re-decoding from storage on every undo.
  *                            Null until the page is first opened in EditScreen.
  *                            Lives as long as the page exists — recycled on page removal or clearAll.
  * @param previewBitmap       [baseBitmap] with all [actions] applied. Shown in EditScreen.
  *                            Null until first EditScreen open. Replaced whenever actions change.
- * @param thumbnailBitmap     Low-res (~144px) copy of [previewBitmap] for SelectScreen list.
+ * @param thumbnailBitmap     Low-res copy of [previewBitmap] for SelectScreen list.
  *                            Regenerated whenever [previewBitmap] changes.
  */
 data class ScanPage(
